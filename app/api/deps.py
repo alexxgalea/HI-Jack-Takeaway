@@ -11,6 +11,11 @@ from app.models.enums import UserRole
 from app.models.user import User
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
+# Same scheme with the 401-on-missing-header turned off, for routes that
+# are public but show more to an admin.
+oauth2_scheme_optional = OAuth2PasswordBearer(
+    tokenUrl="/auth/login", auto_error=False
+)
 
 # Aliases exist so no router signature ever spells out `Depends(...)` inline.
 DbSession = Annotated[Session, Depends(get_db)]
@@ -59,3 +64,22 @@ def require_admin(user: CurrentUser) -> User:
 
 
 AdminUser = Annotated[User, Depends(require_admin)]
+
+
+def get_optional_user(
+    token: Annotated[str | None, Depends(oauth2_scheme_optional)], db: DbSession
+) -> User | None:
+    """The authenticated user, or None when the request carries no token.
+
+    Public endpoints that reveal extra data to admins need this: the required
+    `oauth2_scheme` rejects an anonymous request outright, which would close
+    the route to the very callers it exists for. Only the *absence* of a token
+    is tolerated - a token that is present but expired, forged or belongs to a
+    deactivated user still fails exactly as it does on a protected route.
+    """
+    if token is None:
+        return None
+    return get_current_user(token, db)
+
+
+OptionalUser = Annotated[User | None, Depends(get_optional_user)]
