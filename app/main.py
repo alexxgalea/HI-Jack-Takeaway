@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 
-from app.api.routers import auth, restaurants
+from app.api.routers import auth, orders, restaurants
 from app.core.config import get_settings
 
 
@@ -12,6 +12,7 @@ def create_app() -> FastAPI:
     app.include_router(auth.router)
     app.include_router(restaurants.router)
     app.include_router(restaurants.items_router)
+    app.include_router(orders.router)
 
     @app.get("/health")
     def health() -> dict[str, str]:
