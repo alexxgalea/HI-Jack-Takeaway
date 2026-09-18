@@ -113,10 +113,16 @@ Reported before implementing, per the standing rules:
   before a line of M5 was written, all `duplicate key value violates unique constraint
   "ix_users_email"` from conftest's `admin` fixture colliding with the `admin@example.com`
   row `seed()` had already written.
-  - M3 split the two databases on paper - `.env.example` points pytest at
-    `hijack_takeaway` - but the local `.env` sets `DATABASE_URL` to
-    `hijack_takeaway_dev`, so seeding and pytest shared one database after all.
-  - Not fixed here: M7 owns the throwaway test database, and editing conftest or deleting
-    the seeded row would both be out of bounds. M5 was verified instead by pointing
-    `DATABASE_URL` at a scratch database created and dropped for the run - 135 passed,
-    with dev data and every committed file untouched.
+  - M3 split the two databases on paper only. `.env.example` named `hijack_takeaway` and
+    said nothing about a second one, while the local `.env` pointed `DATABASE_URL` at
+    `hijack_takeaway_dev` - so seeding and pytest shared one database, and the M3 entry
+    above claims a pattern `.env.example` did not actually carry.
+  - Verified around it at the time rather than through it: M7 owns the throwaway test
+    database, and editing conftest or deleting the seeded row were both out of bounds, so
+    M5 was run against a scratch database created and dropped for the run - 135 passed,
+    dev data and every committed file untouched.
+  - **Since fixed** - `.env` now defaults to `hijack_takeaway` with the dev database as an
+    explicit override, and `.env.example` documents both, which command belongs to which,
+    and why the pair must not be crossed. The suite runs clean on the default config.
+    The seeding one-liner is recorded with its `SessionLocal` import: the form first
+    written down omitted it and raises `NameError`.
