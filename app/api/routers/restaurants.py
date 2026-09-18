@@ -66,7 +66,11 @@ def _apply_patch(
 
 @router.get("", response_model=list[RestaurantOut])
 def list_restaurants(db: DbSession) -> Sequence[Restaurant]:
-    return db.scalars(select(Restaurant).order_by(Restaurant.id)).all()
+    # Browsing implies open for business, so a deactivated restaurant drops out
+    # of the listing. Only this query filters: `_get_restaurant` is shared with
+    # the admin write paths, which still need every row.
+    stmt = select(Restaurant).where(Restaurant.is_active.is_(True))
+    return db.scalars(stmt.order_by(Restaurant.id)).all()
 
 
 @router.get("/{restaurant_id}", response_model=RestaurantOut)
