@@ -39,8 +39,10 @@
 - main branch protected: block direct commit
   Update the plan to reflect the decisions - just revise the milestones, do not implement
 
+1.
 # Build
-
+Implement M0 scaffolding per @PLAN.md  — show diffs, stop after scaffolding
 # Review
+Review: 
 
 # Explain
