@@ -4,7 +4,7 @@ Minimal FastAPI backend for a takeaway platform: customers browse restaurants & 
 
 ## Status
 
-Milestones M0–M5 are merged into `main` and green (135 tests passing).
+Milestones M0–M5 are merged into `main` and green (136 tests passing).
 
 - [x] M0: Scaffolding
 - [x] M1: Models + migrations
@@ -54,7 +54,7 @@ app/
   api/routers/             # auth, restaurants, orders
   services/                # order_service, transitions
 alembic/versions/          # 0001_initial.py — all 5 tables + enum types
-tests/                     # 135 tests
+tests/                     # 136 tests
 ```
 
 ## Getting Started
@@ -106,7 +106,7 @@ Interactive docs at http://127.0.0.1:8000/docs — the Authorize button drives t
 pytest
 ```
 
-135 tests, ~8s. Each test runs inside a transaction that is rolled back afterwards, so the suite leaves no rows behind.
+136 tests, ~8s. Each test runs inside a transaction that is rolled back afterwards, so the suite leaves no rows behind.
 
 Coverage on the layers M7 sets a floor for:
 
@@ -144,8 +144,8 @@ M7 replaces this split with a throwaway `docker-compose.test.yml`.
 | POST | `/auth/register` | public | 201; always role `user`; duplicate email → 409 |
 | POST | `/auth/login` | public | form-encoded; `username` is the email |
 | GET | `/auth/me` | auth | |
-| GET | `/restaurants` | public | returns **all** restaurants, active or not |
-| GET | `/restaurants/{id}` | public | unknown id → 404 |
+| GET | `/restaurants` | public | active restaurants only |
+| GET | `/restaurants/{id}` | public | unknown id → 404; answers for inactive restaurants too |
 | GET | `/restaurants/{id}/items` | public | available items only; `?include_unavailable=true` needs admin (401 anonymous, 403 non-admin) |
 | POST | `/restaurants` | admin | 201 |
 | PATCH | `/restaurants/{id}` | admin | applies only the fields sent |
