@@ -4,7 +4,7 @@ Minimal FastAPI backend for a takeaway platform: customers browse restaurants & 
 
 ## Status
 
-Milestones M0–M5 are merged into `main`. M6 is built and green on `feat/06-admin`, awaiting its PR (223 tests passing).
+Milestones M0–M6 are merged into `main`. M7 is in progress on `feat/07-hardening` (230 tests passing).
 
 - [x] M0: Scaffolding
 - [x] M1: Models + migrations
@@ -23,7 +23,7 @@ Milestones M0–M5 are merged into `main`. M6 is built and green on `feat/06-adm
 - Structured logging with redaction, and CORS middleware
 - `tests/test_e2e.py`, `docker-compose.test.yml`, `.github/workflows/ci.yml` — there is no CI; the suite runs locally only
 
-**Known bug, not fixed** — M3's `RestaurantUpdate` and `ItemUpdate` accept an explicit `null` for columns that are NOT NULL, so `PATCH /restaurants/{id}` with `{"name": null}` (likewise `address`, `is_active`, and `PATCH /items/{id}`'s `name`, `price`, `is_available`) reaches the database and returns 500 instead of 422. `None` is how those schemas spell "field absent", so it cannot also be a value. Found while building M6, where [`UserAdminUpdate`](app/schemas/user.py) rejects the same input with 422; left alone in M3's schemas because they are outside M6's scope.
+**Fixed in M7** — M3's `RestaurantUpdate` and `ItemUpdate` used to accept an explicit `null` for columns that are NOT NULL, so `PATCH /restaurants/{id}` with `{"name": null}` (likewise `address`, `is_active`, and `PATCH /items/{id}`'s `name`, `price`, `is_available`) reached the database and returned 500 instead of 422. `None` is how those schemas spell "field absent", so it cannot also be a value. Found while building M6, where [`UserAdminUpdate`](app/schemas/user.py) already rejected the same input with 422, and left alone then as outside M6's scope. Both schemas now carry the same `reject_an_explicit_null` validator — see [null in a PATCH body](#null-in-a-patch-body).
 
 ## Tech Stack
 
@@ -148,9 +148,9 @@ M7 replaces this split with a throwaway `docker-compose.test.yml`.
 | GET | `/restaurants/{id}` | public | unknown id → 404; answers for inactive restaurants too |
 | GET | `/restaurants/{id}/items` | public | available items only; `?include_unavailable=true` needs admin (401 anonymous, 403 non-admin) |
 | POST | `/restaurants` | admin | 201 |
-| PATCH | `/restaurants/{id}` | admin | applies only the fields sent |
+| PATCH | `/restaurants/{id}` | admin | applies only the fields sent; an explicit `null` for a NOT NULL field → 422 |
 | POST | `/restaurants/{id}/items` | admin | 201 |
-| PATCH | `/items/{id}` | admin | also toggles `is_available` |
+| PATCH | `/items/{id}` | admin | also toggles `is_available`; same `null` rule |
 | POST | `/orders` | auth | 201; validates the basket against the live menu, snapshots prices |
 | GET | `/orders` | auth | own orders only; `limit` (1–100, default 20) / `offset`; newest first |
 | GET | `/orders/{id}` | auth | owner or admin; someone else's order reads as 404, not 403 |
@@ -163,6 +163,22 @@ M7 replaces this split with a throwaway `docker-compose.test.yml`.
 Order status moves one step at a time: `pending → accepted → out_for_delivery → delivered`. `delivered` is terminal; there is no cancellation in this scope.
 
 `order_items.unit_price` is snapshotted at order time, so re-pricing a dish never restates what a customer was charged.
+
+### `null` in a PATCH body
+
+Every PATCH body here is a schema whose fields all default to `None`, and the route applies `model_dump(exclude_unset=True)` — so `None` is how these schemas spell "field absent", and a field left out of the body is left alone in the row.
+
+That means `None` cannot also be a value. For a column that is NOT NULL, sending an explicit `null` would otherwise mark the field as set and carry the null down to an UPDATE the database refuses, turning bad input into a 500. A `reject_an_explicit_null` validator on [`RestaurantUpdate`](app/schemas/restaurant.py), [`ItemUpdate`](app/schemas/restaurant_item.py) and [`UserAdminUpdate`](app/schemas/user.py) answers 422 instead:
+
+| Field | Sending `null` |
+| --- | --- |
+| `name`, `address`, `is_active` on a restaurant | 422 |
+| `name`, `price`, `is_available` on an item | 422 |
+| `role`, `is_active` on a user | 422 |
+| `phone` on a restaurant | 200 — clears the number |
+| `description` on an item | 200 — clears the text |
+
+The two nullable columns are deliberately outside the validator: there, a null is a real value, and clearing a field has to stay possible. Only an explicitly sent null reaches the validator — Pydantic does not validate defaults, so an omitted field keeps its `None` and stays excluded.
 
 ### Admin listings
 
