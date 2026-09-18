@@ -70,6 +70,24 @@ async def test_anonymous_can_list_restaurants(
     assert set(listed[restaurant.id]) == set(RestaurantOut.model_fields)
 
 
+async def test_inactive_restaurant_not_in_public_listing(
+    client: AsyncClient, db_session: Session, restaurant: Restaurant
+) -> None:
+    closed = Restaurant(
+        name="Closed Down", address="9 Shut Street", phone=None, is_active=False
+    )
+    db_session.add(closed)
+    db_session.commit()
+    db_session.refresh(closed)
+
+    response = await client.get("/restaurants")
+    assert response.status_code == 200
+
+    listed = {r["id"] for r in response.json()}
+    assert restaurant.id in listed
+    assert closed.id not in listed
+
+
 async def test_anonymous_can_read_one_restaurant(
     client: AsyncClient, restaurant: Restaurant
 ) -> None:
