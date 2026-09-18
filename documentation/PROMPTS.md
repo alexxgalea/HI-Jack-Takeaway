@@ -133,3 +133,80 @@ Reported before implementing, per the standing rules:
     and why the pair must not be crossed. The suite runs clean on the default config.
     The seeding one-liner is recorded with its `SessionLocal` import: the form first
     written down omitted it and raises `NameError`.
+
+## M6 - Admin endpoints
+
+Reported before implementing, per the standing rules:
+
+- **`PaginatedResponse[T]` went to a new `app/schemas/pagination.py`** - the plan names the
+  schema as an M6 key item but lists no file for it, and the target layout puts pydantic
+  models in `schemas/`. `app/schemas/user.py` likewise gained `UserAdminUpdate` for the
+  `PATCH /admin/users/{id}` body, the same way M5's `OrderStatusUpdate` went to
+  `schemas/order.py`.
+- **`GET /orders` still returns `list[OrderOut]`** - M4 deferred the wrapper to M6, but
+  M6's file list does not include the orders router, and "shared" is satisfied by the three
+  admin listings. Retrofitting it would change a response shape already accepted at M4.
+- **Date range is `created_from` / `created_to`, both inclusive on `Order.created_at`** -
+  the plan names the filter, not the parameters.
+- **A bound sent without an offset is read as UTC** - `created_at` is `timestamptz` and all
+  stored values are UTC, but psycopg hands a naive datetime to Postgres as a plain
+  timestamp, which resolves against the session's `TimeZone`. The same query would then
+  select different orders on two differently configured servers.
+- **`created_from` later than `created_to` is 422, not an empty page** - such a range can
+  never match, and answering "no orders" hides the fact that the range itself is wrong.
+- **Paging bounds copied from `GET /orders`** - `limit` 1-100 default 20, `offset` >= 0, so
+  one rule covers every listing in the API.
+- **Newest first is `created_at DESC, id DESC`** - M4's tiebreaker, for M4's reason:
+  Postgres `now()` is the transaction clock, so orders placed together share a timestamp.
+- **`GET /admin/users` is ordered by id, not newest first** - `UserOut` carries no
+  timestamp, so a descending list would be sorted by something the caller cannot see.
+- **403 comes from `admin: AdminUser` on every signature** - not from the router's own
+  `dependencies=[...]`, which needs the inline dependency call M2 ruled out and its
+  convention test greps for. That grep reads comments too, so even explaining the
+  alternative in a comment breaks the suite - found the hard way.
+- **Filters are not lookups** - an unknown `restaurant_id` or `customer_id` on
+  `/admin/orders` yields an empty page, which is also the honest answer for a real id with
+  no orders. `/admin/restaurants/{id}/orders` does look the restaurant up, so an unknown id
+  there is a 404: asking a named restaurant for its orders and being handed silence hides a
+  mistake. An unknown user on `PATCH /admin/users/{id}` is a 404 as well, per M3's
+  convention.
+- **No filters beyond `limit`/`offset` on `GET /admin/users` and
+  `/admin/restaurants/{id}/orders`** - the plan names filters for `/admin/orders` only.
+- **No last-admin guard on `PATCH /admin/users/{id}`** - an admin can demote or deactivate
+  themselves, locking the role out of a running system. A real footgun, reported as such,
+  and left in because the plan names no such rule; a test documents the behaviour so it
+  reads as decided rather than missed.
+- **The route also refuses to edit anything else** - `email`, `full_name` and
+  `hashed_password` in the body are ignored, not applied. Promoting an account must not
+  double as a way to take it over.
+
+Found while building it:
+
+- **Caught: an explicit `null` reached the database.** `{"role": null}` sets the field
+  rather than leaving it unset, so `model_dump(exclude_unset=True)` carried it into an
+  UPDATE that Postgres refused - a 500 for plainly bad input. `None` is how absence is
+  spelled in these PATCH bodies, so it cannot also be a value: a `field_validator` on
+  `UserAdminUpdate` now rejects it with 422. Only an explicitly sent null reaches the
+  validator, because pydantic does not validate defaults.
+  - **The same flaw is still open in M3** - `RestaurantUpdate` and `ItemUpdate` accept
+    `null` for `name`, `address`, `is_active`, `price` and `is_available`, all NOT NULL
+    columns, so `PATCH /restaurants/{id}` with `{"name": null}` returns 500. Probed with a
+    throwaway probe, then left alone: M3's schemas are outside M6's file list. Recorded in
+    the README as a known bug.
+- **Caught: a range with one bound offsetless raised `TypeError`.** Comparing a naive
+  datetime with an aware one is a 500, and both forms are legal input. The two bounds are
+  now put on the same clock *before* they are compared, with tests for either ordering.
+- **The count and the page come from one statement** - `_page` counts
+  `stmt.order_by(None).subquery()` and then slices the same `stmt`, so a filter added to a
+  listing is counted by construction. A second hand-written count query is the kind that
+  silently drifts from the one it is meant to mirror.
+- **The 403 tests are parametrized over routes discovered from the router** - read off
+  `admin.router.routes` rather than listed by hand, so a route added later is covered the
+  moment it exists. A separate test asserts the discovered list is exactly the four
+  endpoints, so the parametrization cannot quietly go empty.
+- **Order rows in `tests/test_admin.py` are written straight to the table** - not placed
+  through `POST /orders`, not walked with `PATCH /orders/{id}/status`. Those paths belong
+  to M4 and M5, and neither lets a test choose `created_at` or reach `delivered` in one
+  step; the date-range filter is untestable without that control, since every
+  default-stamped row inside one transaction shares a timestamp. One test does place an
+  order over HTTP and assert it appears in every admin view.
