@@ -1,0 +1,28 @@
+## Key design decisions
+
+- **Model:** `users`, `restaurants`, `restaurant_items`, `orders`, `order_items`.
+- **Relations**
+  - `restaurants` 1–N `restaurant_items`
+  - `users` 1–N `orders`
+  - `restaurants` 1–N `orders`
+  - `orders` 1–N `order_items`
+  - `restaurant_items` 1–N `order_items`
+  - Key FKs:
+    - `restaurant_items.restaurant_id` → `restaurants.id`
+    - `orders.customer_id` → `users.id`
+    - `orders.restaurant_id` → `restaurants.id`
+    - `order_items.order_id` → `orders.id`
+    - `order_items.restaurant_item_id` → `restaurant_items.id`
+    - `users.email` unique, indexed.
+- **Order status:** enum with fixed values `pending → accepted → out_for_delivery → delivered`; invalid transitions are rejected.
+- **Prices:** `order_items.unit_price` is a snapshot at order time, not recomputed from the menu.
+- **Availability:** modelled as `restaurant_items.is_available` (bool); no ingredient-level inventory or stock tables.
+- **Auth:** Custom JWT with `pyjwt`, **not** `fastapi-users`.
+  - *Rationale:* default FastAPI approach, minimal dependencies, full control over token payload, expiration and role checks.
+  - Token extraction: `OAuth2PasswordBearer(tokenUrl="/auth/login")`; `POST /auth/login` therefore consumes `OAuth2PasswordRequestForm` (form `username` = email).
+  - Tokens: `pyjwt`, HS256, decoded with an explicit `algorithms=["HS256"]` allowlist; claims `sub` (user id), `role`, `exp`, `iat`.
+  - Access tokens short-lived (15–30 min). No refresh tokens, no revocation list, no password reset.
+  - Passwords: one-way hashing via `pwdlib` (Argon2).
+  - Roles: two — `user`, `admin`.
+  - Dependencies: `get_current_user` (decode → validate `exp`/`sub` → load user → 401 on any failure), `require_admin` (`user.role == "admin"` else 403).
+- **Out of scope:** payments, refunds, coupons, driver assignment, GPS/live tracking, complex inventory.
