@@ -80,3 +80,49 @@ Reported before implementing, per the standing rules:
   (`min_length=1`), and `GET /orders` sorts `created_at DESC, id DESC`. The id tiebreaker
   is load-bearing: Postgres `now()` is the transaction clock, so orders placed together
   share a timestamp.
+
+## M5 - Status transitions
+
+- **`OrderStatusUpdate` added to `app/schemas/order.py`** - the plan's M5 file list names
+  only `transitions.py`, the orders router and the test file, but the `{"status": ...}`
+  body needs a model. It went to the resource's schema module, per the target layout.
+  Reported on delivery rather than before: the gap only showed while wiring the route.
+- **409 for an illegal move, 404 for a missing order** - an illegal move is a conflict with
+  the state the order is in, not a malformed request, so `assert_transition` raises 409 and
+  names both ends in the detail. The missing-order 404 is a plain one, unlike
+  `GET /orders/{id}`'s owner-shaped 404: the caller is already an admin, so there is
+  nothing left to hide by pretending the id does not exist.
+- **The row lock is taken before the check, not around the write** - `set_order_status`
+  opens with `db.refresh(order, with_for_update=True)`, so the status the guard reads is
+  the committed one.
+  - Locking only the write would let two admins both read `accepted`, both pass the guard,
+    and the order would take a step it never legally made.
+- **`updated_at` is left to the column's own `onupdate=func.now()`** - not restated in the
+  service, so there is a single definition of when that clock moves. Verified against
+  emitted SQL rather than assumed: `UPDATE orders SET status=..., updated_at=now()`.
+  - Not asserted as a strict increase in tests: Postgres `now()` is the transaction clock,
+    and the `db_session` fixture runs each test inside one transaction, so an insert and a
+    later update share a timestamp there. Same root cause as M4's id tiebreaker.
+- **`can_transition` reads the table with `.get(current, set())`** - a status added to
+  `OrderStatus` without a matching table entry then degrades to a 409 instead of a
+  `KeyError` surfacing as a 500.
+- **Four tests the plan does not name** - a status outside the enum is 422, an empty body
+  is 422, an unknown order is 404, and a refused move is asserted to leave the row
+  untouched. The matrix test carries that last check on every illegal pair.
+- **Caught: the suite was running against the seeded dev database** - 19 errors on `main`
+  before a line of M5 was written, all `duplicate key value violates unique constraint
+  "ix_users_email"` from conftest's `admin` fixture colliding with the `admin@example.com`
+  row `seed()` had already written.
+  - M3 split the two databases on paper only. `.env.example` named `hijack_takeaway` and
+    said nothing about a second one, while the local `.env` pointed `DATABASE_URL` at
+    `hijack_takeaway_dev` - so seeding and pytest shared one database, and the M3 entry
+    above claims a pattern `.env.example` did not actually carry.
+  - Verified around it at the time rather than through it: M7 owns the throwaway test
+    database, and editing conftest or deleting the seeded row were both out of bounds, so
+    M5 was run against a scratch database created and dropped for the run - 135 passed,
+    dev data and every committed file untouched.
+  - **Since fixed** - `.env` now defaults to `hijack_takeaway` with the dev database as an
+    explicit override, and `.env.example` documents both, which command belongs to which,
+    and why the pair must not be crossed. The suite runs clean on the default config.
+    The seeding one-liner is recorded with its `SessionLocal` import: the form first
+    written down omitted it and raises `NameError`.

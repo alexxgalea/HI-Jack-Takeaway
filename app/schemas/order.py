@@ -43,3 +43,10 @@ class OrderOut(BaseModel):
     created_at: datetime
     updated_at: datetime
     items: list[OrderItemOut]
+
+
+class OrderStatusUpdate(BaseModel):
+    # The whole body of `PATCH /orders/{id}/status`. A value outside the enum
+    # is a 422 at the boundary; a value inside it that the order cannot reach
+    # from where it stands is a 409 from `assert_transition`.
+    status: OrderStatus
