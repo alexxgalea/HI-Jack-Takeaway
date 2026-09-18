@@ -1,74 +1,82 @@
-## Prompts used
+# Prompt log
 
-# Plan
+What was asked of the assistant, recorded as decisions rather than transcripts.
+[PLAN.md](PLAN.md) holds the spec and [DECISIONS.md](DECISIONS.md) the architecture
+that outlives this project; this file is the trail of *why the plan changed when it
+did*, in the order it happened.
 
-1.  We're building a FastAPI takeaway platform. Key decisions are fixed in DECISIONS.md.
-    Tech stack: FastAPI, PostgreSQL, SQLAlchemy, Alembic, Pydantic.
-    Task: Create a step by step implementation plan with milestones (e.g. , scaffolding, models, auth, orders, status transitions, admin endpoints). For each milestone: files to create, key functions & classes, acceptance criteria. Propose a suggested order of execution that allows running and testing incrementally. Keep it concise (bullet points, no prose). Stop after the plan, no implementation.
+One section per milestone. One bullet per decision, short enough to scan - extend any
+of them with nested bullets when a decision needs its reasoning kept.
 
-2.  Review note: after reviewing the implementation plan: i am locking on the auth approach
-    Decision: Custom JWT with PyJWT, not fastapi-users
-    Rationale: default FastAPI choice, minimal dependencies (pyjwt & pwdlib), fullcontrol over token payload, expiration, role checks, keeps it simple
-    Requirements: OAuth2PasswordBearer(tokenUrl="/auth/login") for token extraction, pyjwt for encoding/decoding tokens with algorithms=["HS256"],
-    pwdlib for one-way password hashing (Argon2 or bcrypt), get_current_user dependency: decode JWT → validate exp/sub → load user → raise 401 on failure, require_admin dependency: check user.role == "admin", Access tokens short-lived (15–30 min)
-    Update the plan to reflect this auth approach (files, functions, acceptance criteria); Do not implement yet - just revise the milestones
+## Standing rules
 
-3.  Yes, update DECISIONS.md to reflect the auth decisions.
+Carried by every build prompt, so they are stated once here instead of repeated per entry:
 
-4.  Review: after reviewing implementation again: small refinements:
-    Decisions:
+- Implement strictly what PLAN.md specifies for the milestone.
+- Report any departure from it *before* writing code - no out-of-bound decisions.
+- Stop after showing diffs; commits and PRs are made by hand.
 
-- Freeze versions with pyproject.toml
-- Add pytest-asyncio & httpx to test deps
-- Revise the aliases in M2: CurrentUser & AdminUser -> type aliases:
-  from typing import Annotated
-  CurrentUser = Annotated[User, Depends(get_current_user)]
-  AdminUser = Annotated[User, Depends(require_admin)]
-- Explicit note about python-multipart requirement (OAuth2PasswordRequestForm requires python-multipart)
-- docker-compose.test.yml for CI in M7
-- 8 extra git branches in plan, mapped to the milestones and planning step:
-  - plan/initial
-  - feat/00-scaffolding
-  - feat/01-models-migration
-  - feat/02-auth
-  - feat/03-restaurants
-  - feat/04-orders
-  - feat/05-transitions
-  - feat/06-admin
-  - feat/07-hardening
-- main branch protected: block direct commit
-  Update the plan to reflect the decisions - just revise the milestones, do not implement
+## Planning
 
-1.
-# Build
-Implement M0 scaffolding per @PLAN.md  — show diffs, stop after scaffolding
-# Review
-Review: 
-Review M0 scaffolding against PLAN.md acceptance criteria:
+- **Plan shape** - milestones, each with files, key functions and classes, and acceptance
+  criteria, ordered so the app can be run and tested incrementally. Bullets, no prose.
+- **Auth locked to custom JWT (PyJWT), not fastapi-users** - default FastAPI approach,
+  minimal dependencies, full control over token payload, expiry and role checks.
+  Fixes `OAuth2PasswordBearer(tokenUrl="/auth/login")`, `algorithms=["HS256"]`, pwdlib
+  for hashing, `get_current_user` / `require_admin` dependencies, 15-30 min tokens.
+- **DECISIONS.md restated to match** - the auth decision is architecture, not a milestone
+  detail, so it lives there too.
+- **Versions frozen** - every dependency `==`-pinned in `pyproject.toml` with a lockfile.
+- **Async test wiring from the start** - `pytest-asyncio` and `httpx` in the test deps.
+- **`CurrentUser` / `AdminUser` as `Annotated` type aliases** - routers never spell out
+  `Depends(...)` inline.
+- **`python-multipart` is mandatory, not optional** - `OAuth2PasswordRequestForm` parses
+  multipart; easy to drop when trimming deps because no application code imports it.
+- **Throwaway test Postgres deferred to M7** - `docker-compose.test.yml`, never the dev DB.
+- **One branch per milestone** - `plan/initial` plus `feat/00..07`, sequential; `main`
+  protected against direct commits.
 
-Check the following files:
+## M0 - Scaffolding
 
-pyproject.toml, requirements.lock
+- **Reviewed against the acceptance criteria before moving on** - every scaffolding file
+  checked for spec match, hardcoded secrets, and anti-patterns.
+- **Caught: `JWT_SECRET` did not fail loudly when empty** - a required `str` field rejects
+  a *missing* secret but accepts a blank one, so startup succeeded with no signing key.
+  Fixed with a `field_validator` on `Settings.jwt_secret`.
 
-.env.example, .gitignore
+## M1 - Models + first migration
 
-app/main.py, app/core/config.py, app/db/session.py, app/db/base.py
+- Built to plan; no departures.
 
-tests/conftest.py, tests/test_health.py
+## M2 - Auth (custom JWT, pyjwt + pwdlib)
 
-docker-compose.yml
+- Built to plan; no departures.
 
-For each file, verify:
+## M3 - Restaurants & menu
 
-Matches PLAN.md spec (deps pinned, Settings structure, DB session pattern, test fixtures)
+- **`GET /restaurants` lists active restaurants only** - browsing implies active ones.
+  Covered by a test asserting an inactive restaurant is absent from the public listing.
+- **Seed script pulled forward from M7** - `app/db/seed.py` creates the admin, Pizza Place
+  (Margherita 12.99, Pepperoni 14.99) and Burger Joint (Cheeseburger 9.99, Fries 3.99),
+  all active and available. Called out in the PR description as an early M7 file.
+- **Dev and test databases split** - seeding targets `hijack_takeaway_dev`; pytest keeps
+  `hijack_takeaway` untouched. The pattern is documented in `.env.example` until M7
+  replaces it with `docker-compose.test.yml`.
 
-No security issues (no hardcoded secrets, .env ignored, fails loudly on missing JWT_SECRET)
+## M4 - Order placement
 
-No obvious bugs or anti-patterns
+Reported before implementing, per the standing rules:
 
-
-CATCHED: JWT_SECRET doesn't actually fail loudly when empty 
-
-2.
-#Build
-Implement M1 models + first migration as described in the @documentation/PLAN.md  Stick entirely to the @documentation/PLAN.md Any change in directives needs to be firstly reported: no out of bound decisions.
+- **Pagination stays a plain list** - `GET /orders` takes `limit`/`offset` and returns
+  `list[OrderOut]`. The shared `PaginatedResponse[T]` belongs to M6; wrapping it now would
+  pull M6 forward.
+- **404 for a missing restaurant, 400 for a rejected basket** - an unknown `restaurant_id`
+  follows M3's unknown-id convention; an inactive restaurant, a foreign item, an
+  unavailable item and an unknown item id are all business-rule rejections. An unknown item
+  id answers identically to a foreign one, so the endpoint cannot probe which ids exist.
+- **`quantity > 0` is enforced twice** - `Field(gt=0)` on the schema, so over HTTP the
+  status is 422; the check inside `create_order` guards direct service calls.
+- **Two additions the plan does not name** - a basket must carry at least one line
+  (`min_length=1`), and `GET /orders` sorts `created_at DESC, id DESC`. The id tiebreaker
+  is load-bearing: Postgres `now()` is the transaction clock, so orders placed together
+  share a timestamp.
