@@ -1,9 +1,9 @@
 from decimal import Decimal
 
-from fastapi import HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.core.errors import BusinessRuleError, NotFoundError
 from app.models.enums import OrderStatus
 from app.models.order import Order
 from app.models.order_item import OrderItem
@@ -13,14 +13,18 @@ from app.models.user import User
 from app.schemas.order import OrderCreate
 
 
-def _rejected(detail: str) -> HTTPException:
+def _rejected(detail: str) -> BusinessRuleError:
     """A well-formed request that breaks an ordering rule.
 
     Distinct from 422: the payload parsed fine, it just asks for something the
     menu does not allow. Item ids are echoed back because the caller already
     knows them - no information crosses that was not sent in.
+
+    `BusinessRuleError` rather than `HTTPException`: the rule is the menu's,
+    not HTTP's, and M7's handler is what turns it into the same 400 this
+    returned before.
     """
-    return HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=detail)
+    return BusinessRuleError(detail)
 
 
 def create_order(db: Session, customer: User, payload: OrderCreate) -> Order:
@@ -36,9 +40,7 @@ def create_order(db: Session, customer: User, payload: OrderCreate) -> Order:
     """
     restaurant = db.get(Restaurant, payload.restaurant_id)
     if restaurant is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Restaurant not found"
-        )
+        raise NotFoundError("Restaurant not found")
     if not restaurant.is_active:
         raise _rejected("Restaurant is not accepting orders")
 

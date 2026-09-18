@@ -210,3 +210,124 @@ Found while building it:
   step; the date-range filter is untestable without that control, since every
   default-stamped row inside one transaction shares a timestamp. One test does place an
   order over HTTP and assert it appears in every admin view.
+
+## M7 - Hardening
+
+Reported before implementing, per the standing rules. The plan's M7 file list names
+`errors.py`, `seed.py`, `test_e2e.py`, `README.md`, `docker-compose.test.yml` and
+`ci.yml`; three of its key items cannot be delivered inside it, and those departures
+were put up for decision first:
+
+- **`app/main.py` had to change** - exception handlers, CORS and the request-logging
+  middleware are all registered on the app. There is no version of "register handlers"
+  that does not touch the factory.
+- **`AppError` adoption is services-only** - `order_service.py` and `transitions.py`
+  now raise `NotFoundError` / `BusinessRuleError` / `ConflictError`, so neither imports
+  `fastapi` any more; the routers keep `HTTPException` for plumbing. Chosen over both
+  alternatives on the table: defining the hierarchy without using it leaves most of it
+  dead, and migrating all four routers plus `deps.py` is a seven-file refactor of
+  settled code for no change in behaviour. The middle option is the one the plan's own
+  "routers thin, business rules in `services/`" convention argues for.
+  - Behaviour is unchanged by construction: same status codes, same details. The M4 and
+    M5 tests that assert 400/404/409 pass untouched, which is what proves the mapping.
+- **Logging went to a new `app/core/logging.py`** - the plan names the key item but no
+  file. Same precedent as M6's `schemas/pagination.py`: an unnamed-but-required module
+  goes to its natural home in the target layout.
+- **CORS origins come from a new `cors_origins` setting**, default `["*"]`, credentials
+  disabled. The plan says "CORS middleware" and nothing about origins. The wildcard is
+  only defensible because auth is a Bearer header the client attaches deliberately and
+  never a cookie the browser sends on its own - with credentials enabled a wildcard is
+  both invalid per spec and an open door.
+- **The coverage floor lives in `ci.yml`, not `pyproject.toml`** - `--cov-fail-under=80`
+  on the CI invocation keeps the gate where the plan puts it while leaving a local
+  `pytest` fast and coverage-free. `pyproject.toml` is also outside M7's file list.
+- **`.env.example` got two edits** - it carried a comment promising that "M7 replaces
+  this with docker-compose.test.yml", which M7 makes false, and the new `CORS_ORIGINS`
+  belongs where the other settings are documented. Out of the file list, but a config
+  example that lies about the current release is worse than the diff.
+- **This section itself** - PROMPTS.md is not in M7's file list either, and its own
+  standing rules require an entry per milestone.
+
+Decided while implementing:
+
+- **422 keeps FastAPI's shape.** "Consistent `{"detail": ...}`" covers `AppError`,
+  `HTTPException` and the catch-all 500; `RequestValidationError` still answers with a
+  list of per-field errors under `detail`, because that is strictly more useful than one
+  sentence and has been the API's answer since M0. Normalising it would rewrite a
+  response shape every earlier milestone was accepted against.
+- **The 500 body is a fixed sentence** - `{"detail": "Internal server error"}`, with the
+  traceback logged instead. A stack trace in a response body hands over the file layout,
+  the library versions and often the SQL. Two tests assert the exception's own message,
+  the word `Traceback` and the exception class are all absent from the body.
+- **Redaction is a filter on the handler, not on a logger** - a filter attached to a
+  logger is skipped by records propagating up from its children, which would leave every
+  other module in the process unprotected.
+- **Two layers of redaction, because keys are not always available** - sensitive *keys*
+  (`Authorization`, `Cookie`, `Set-Cookie`, `password`, `token`, `secret` and
+  neighbours) are blanked wherever they appear, including nested; and rendered message
+  text is scrubbed for credential *shapes* (`Bearer <jwt>`, `password=...`), which is
+  the only thing that catches a token pasted into a string with no key on it.
+  - The text pass over-redacts slightly - `Authorization: Bearer x` comes out as two
+    `[REDACTED]` markers rather than one. Left as is: erring toward blanking too much is
+    the right direction for a log.
+- **Request logging records metadata only** - method, path, status, duration. No bodies
+  and no headers, not even redacted ones: the cheapest way never to log a password is
+  never to read one into a record. The path is logged without its query string for the
+  same reason, since a token passed as a query parameter would otherwise be written down
+  verbatim. A test asserts the record carries exactly those fields and no others.
+- **CORS is the outermost middleware** - added last, so it wraps the request log and a
+  preflight is answered without being logged as a request the app served. A preflight
+  carries no token, so routing one to `POST /orders` would answer 401 and the browser
+  would report a CORS failure for a perfectly valid request.
+- **`seed()` was left exactly as it is.** Inspected against the plan's wording - admin
+  user, 2 restaurants, sample menus - and run against a fresh database: 1 user, 2
+  restaurants, 4 items, and a second run changes nothing. It was already idempotent by
+  name and email, so there was nothing to repair.
+- **The E2E test is one journey, not a second suite** - register, login, browse
+  anonymously, order, walk the status to `delivered`, read it back. The edge cases stay
+  in `test_orders.py` and `test_transitions.py`; duplicating them here would only give
+  every future change two places to fail. What it covers that they cannot is the seams:
+  that a token from `POST /auth/login` is accepted by `POST /orders`, and that ids
+  handed back by one endpoint are the ids the next one wants.
+- **The test database is isolated four ways** - its own compose project name, service
+  (`postgres-test`), database (`hijack_takeaway_test`) and host port (55432). The data
+  directory is a `tmpfs`, so there is no volume to leave behind and a killed run cannot
+  strand a cluster.
+  - `PGDATA` points one level *inside* the tmpfs mount: the mount point itself is
+    root-owned and `initdb` refuses a data directory it does not own, so the subdirectory
+    is what lets Postgres create it with the permissions it insists on.
+- **Caught on review: "the suite does not touch dev data" was still only a convention.**
+  M7 was first delivered with the suite defaulting to whatever `DATABASE_URL` said,
+  which meant `.env` - and `.env.example` documents pointing `DATABASE_URL` at the dev
+  database for seeding and for running the server. A developer with that export live in
+  their shell who then ran `pytest` wrote to dev data, which is exactly the accident M5
+  recorded. Reported as a limitation rather than fixed, and rightly pushed back on: the
+  plan states it as an acceptance criterion, not a preference.
+  - **Fixed in `tests/conftest.py`, not in M0.** Two statements ahead of the `app`
+    imports, because `Settings` is cached on first use and `app.db.session` builds its
+    engine at import time: `os.environ.setdefault("DATABASE_URL", <throwaway URL>)`,
+    then `assert_is_a_test_database` on whatever URL is in effect.
+  - **The injection is what makes `.env` unable to reach the suite** - an environment
+    variable outranks the dotenv file in pydantic-settings, so `pytest` with nothing
+    configured now targets port 55432 regardless of what `.env` names.
+  - **The guard fails closed, by database name** - `*_test` and M0's `hijack_takeaway`
+    pass; `hijack_takeaway_dev`, a staging URL and a production one all abort collection
+    before a connection is opened. An allowlist rather than a denylist on purpose: a
+    denylist admits every database nobody thought to name.
+    - `test_but_not_at_the_end` is refused too - `test` appearing somewhere in the name
+      is not the rule, the suffix is.
+  - **M0's database stays allowed** so `docker compose up` remains a working way to run
+    the suite, which M0's own acceptance criterion requires. It has to be named
+    explicitly now; it is no longer what you get by default.
+  - **`tests/conftest.py` is an M0 file, and outside M7's list.** Changing it is the
+    smallest fix that makes the criterion true - the alternative, redesigning how
+    `Settings` resolves the database, would reach into M0 proper.
+  - Verified all four ways round: dev URL refused with an actionable message and no
+    connection; bare `pytest` on the throwaway database, 280 passed; the legacy database
+    named explicitly, 280 passed; and the injected URL shown to beat the one in `.env`.
+- **Known limitation: a 500 response carries no CORS headers.** Starlette's
+  `ServerErrorMiddleware` sits outside the user middleware stack, so the catch-all
+  handler's response never passes back through `CORSMiddleware`. Handled `AppError`
+  responses are unaffected - they are rendered inside the stack and do carry the headers.
+  Left alone: the fix is a middleware-ordering workaround for a case that only shows up
+  when the server is already broken.
