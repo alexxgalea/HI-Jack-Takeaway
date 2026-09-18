@@ -1,10 +1,10 @@
 # Takeaway Platform Backend
 
-Minimal FastAPI backend for a takeaway platform: customers browse restaurants & menus, place orders, and track order status. Admins manage restaurants, menu items, and order status transitions.
+Minimal FastAPI backend for a takeaway platform: customers browse restaurants & menus, place orders, and track order status. Admins manage restaurants, menu items and order status transitions, read the whole order book, and manage accounts.
 
 ## Status
 
-Milestones M0–M5 are merged into `main` and green (136 tests passing).
+Milestones M0–M5 are merged into `main`. M6 is built and green on `feat/06-admin`, awaiting its PR (223 tests passing).
 
 - [x] M0: Scaffolding
 - [x] M1: Models + migrations
@@ -12,18 +12,18 @@ Milestones M0–M5 are merged into `main` and green (136 tests passing).
 - [x] M3: Restaurants & menu
 - [x] M4: Order placement
 - [x] M5: Status transitions
-- [ ] M6: Admin endpoints — not started
+- [x] M6: Admin endpoints
 - [ ] M7: Hardening + CI — partially delivered (see below)
 
 **Delivered ahead of its milestone:** [`app/db/seed.py`](app/db/seed.py) (an M7 item) landed with M3, and [`app/core/errors.py`](app/core/errors.py) landed with M2 as a two-class stub because `decode_token` needed `CredentialsError`.
 
 **Not implemented yet** — described in [PLAN.md](documentation/PLAN.md), absent from the code:
 
-- `app/api/routers/admin.py` and every `/admin/*` route (`GET /admin/orders`, `GET /admin/users`, `PATCH /admin/users/{id}`, `GET /admin/restaurants/{id}/orders`)
-- The shared `PaginatedResponse[T]` schema — `GET /orders` returns a plain `list[OrderOut]`
 - Exception handlers for the `AppError` hierarchy; nothing is registered on the app, so error shapes are FastAPI's defaults
 - Structured logging with redaction, and CORS middleware
 - `tests/test_e2e.py`, `docker-compose.test.yml`, `.github/workflows/ci.yml` — there is no CI; the suite runs locally only
+
+**Known bug, not fixed** — M3's `RestaurantUpdate` and `ItemUpdate` accept an explicit `null` for columns that are NOT NULL, so `PATCH /restaurants/{id}` with `{"name": null}` (likewise `address`, `is_active`, and `PATCH /items/{id}`'s `name`, `price`, `is_available`) reaches the database and returns 500 instead of 422. `None` is how those schemas spell "field absent", so it cannot also be a value. Found while building M6, where [`UserAdminUpdate`](app/schemas/user.py) rejects the same input with 422; left alone in M3's schemas because they are outside M6's scope.
 
 ## Tech Stack
 
@@ -49,12 +49,12 @@ app/
   db/session.py            # engine, SessionLocal, get_db
   db/seed.py               # dev seed: admin + 2 restaurants with menus
   models/                  # user, restaurant, restaurant_item, order, order_item, enums
-  schemas/                 # pydantic in/out per resource
+  schemas/                 # pydantic in/out per resource, plus PaginatedResponse[T]
   api/deps.py              # CurrentUser / AdminUser / OptionalUser aliases
-  api/routers/             # auth, restaurants, orders
+  api/routers/             # auth, restaurants, orders, admin
   services/                # order_service, transitions
 alembic/versions/          # 0001_initial.py — all 5 tables + enum types
-tests/                     # 136 tests
+tests/                     # 223 tests
 ```
 
 ## Getting Started
@@ -106,7 +106,7 @@ Interactive docs at http://127.0.0.1:8000/docs — the Authorize button drives t
 pytest
 ```
 
-136 tests, ~8s. Each test runs inside a transaction that is rolled back afterwards, so the suite leaves no rows behind.
+223 tests, ~16s. Each test runs inside a transaction that is rolled back afterwards, so the suite leaves no rows behind.
 
 Coverage on the layers M7 sets a floor for:
 
@@ -155,10 +155,36 @@ M7 replaces this split with a throwaway `docker-compose.test.yml`.
 | GET | `/orders` | auth | own orders only; `limit` (1–100, default 20) / `offset`; newest first |
 | GET | `/orders/{id}` | auth | owner or admin; someone else's order reads as 404, not 403 |
 | PATCH | `/orders/{id}/status` | admin | body `{"status": ...}`; illegal move → 409 |
+| GET | `/admin/orders` | admin | every order, newest first; filters below |
+| GET | `/admin/restaurants/{id}/orders` | admin | one restaurant's order book; unknown id → 404 |
+| GET | `/admin/users` | admin | every account, by id; `UserOut`, so no password field |
+| PATCH | `/admin/users/{id}` | admin | body `{"role": ..., "is_active": ...}`, both optional |
 
 Order status moves one step at a time: `pending → accepted → out_for_delivery → delivered`. `delivered` is terminal; there is no cancellation in this scope.
 
 `order_items.unit_price` is snapshotted at order time, so re-pricing a dish never restates what a customer was charged.
+
+### Admin listings
+
+All three `/admin` listings answer with the same envelope, where `total` counts every row the filters matched rather than the rows returned:
+
+```json
+{ "items": [], "total": 0, "limit": 20, "offset": 0 }
+```
+
+`limit` is 1–100 (default 20) and `offset` ≥ 0 on every listing, the same bounds `GET /orders` uses. `GET /admin/orders` takes five further filters, each optional and all ANDed together:
+
+| Filter | Accepts | Notes |
+| --- | --- | --- |
+| `status` | an `OrderStatus` value | anything else → 422 |
+| `restaurant_id` | integer | a filter, not a lookup: an id matching nothing is an empty page, not a 404 |
+| `customer_id` | integer | same |
+| `created_from` | ISO 8601 datetime | inclusive; a value with no offset is read as UTC |
+| `created_to` | ISO 8601 datetime | inclusive; `created_from` later than `created_to` → 422 |
+
+`GET /admin/restaurants/{id}/orders` is the same page narrowed to one restaurant, with the restaurant looked up first so an unknown id is a 404 instead of silence. An inactive restaurant still has an order book.
+
+`PATCH /admin/users/{id}` edits the role and the activation flag and nothing else — an `email`, `full_name` or `hashed_password` in the body is ignored. An omitted field is left alone; an explicit `null` is 422, because `null` is how absence is spelled. Deactivation takes effect immediately, including on tokens already issued: `get_current_user` re-reads `is_active`, so no blacklist is involved. Nothing prevents an admin from demoting or deactivating themselves — the plan names no last-admin guard, so none was invented.
 
 ## Documentation
 
