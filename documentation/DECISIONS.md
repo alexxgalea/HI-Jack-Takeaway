@@ -13,7 +13,7 @@
     - `orders.restaurant_id` → `restaurants.id`
     - `order_items.order_id` → `orders.id`
     - `order_items.restaurant_item_id` → `restaurant_items.id`
-    - `users.email` unique, indexed.
+  - Other constraints: `users.email` unique, indexed.
 - **Order status:** enum with fixed values `pending → accepted → out_for_delivery → delivered`; invalid transitions are rejected.
 - **Prices:** `order_items.unit_price` is a snapshot at order time, not recomputed from the menu.
 - **Availability:** modelled as `restaurant_items.is_available` (bool); no ingredient-level inventory or stock tables.

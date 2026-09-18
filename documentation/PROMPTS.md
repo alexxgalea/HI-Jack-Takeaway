@@ -56,6 +56,13 @@ Carried by every build prompt, so they are stated once here instead of repeated 
 
 - **`GET /restaurants` lists active restaurants only** - browsing implies active ones.
   Covered by a test asserting an inactive restaurant is absent from the public listing.
+  - **Correction - never implemented.** Neither half of that claim holds. `list_restaurants`
+    selects every restaurant with no `is_active` filter, and no test asserts an inactive one
+    is absent - `test_admin_can_deactivate_a_restaurant` only checks the PATCH response.
+    Deactivation is enforced at order time instead: `create_order` rejects an inactive
+    restaurant with 400, so a closed restaurant stays browsable but cannot be ordered from.
+    Left standing rather than fixed in place - either the listing gains the filter and the
+    test, or the decision is withdrawn.
 - **Seed script pulled forward from M7** - `app/db/seed.py` creates the admin, Pizza Place
   (Margherita 12.99, Pepperoni 14.99) and Burger Joint (Cheeseburger 9.99, Fries 3.99),
   all active and available. Called out in the PR description as an early M7 file.
