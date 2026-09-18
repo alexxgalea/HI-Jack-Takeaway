@@ -44,5 +44,31 @@
 Implement M0 scaffolding per @PLAN.md  — show diffs, stop after scaffolding
 # Review
 Review: 
+Review M0 scaffolding against PLAN.md acceptance criteria:
 
-# Explain
+Check the following files:
+
+pyproject.toml, requirements.lock
+
+.env.example, .gitignore
+
+app/main.py, app/core/config.py, app/db/session.py, app/db/base.py
+
+tests/conftest.py, tests/test_health.py
+
+docker-compose.yml
+
+For each file, verify:
+
+Matches PLAN.md spec (deps pinned, Settings structure, DB session pattern, test fixtures)
+
+No security issues (no hardcoded secrets, .env ignored, fails loudly on missing JWT_SECRET)
+
+No obvious bugs or anti-patterns
+
+
+CATCHED: JWT_SECRET doesn't actually fail loudly when empty 
+
+2.
+#Build
+Implement M1 models + first migration as described in the @documentation/PLAN.md  Stick entirely to the @documentation/PLAN.md Any change in directives needs to be firstly reported: no out of bound decisions.
