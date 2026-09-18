@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 
-from app.api.routers import auth
+from app.api.routers import auth, restaurants
 from app.core.config import get_settings
 
 
@@ -10,6 +10,8 @@ def create_app() -> FastAPI:
     app = FastAPI(title="HI-Jack Takeaway")
 
     app.include_router(auth.router)
+    app.include_router(restaurants.router)
+    app.include_router(restaurants.items_router)
 
     @app.get("/health")
     def health() -> dict[str, str]:
