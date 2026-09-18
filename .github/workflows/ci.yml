@@ -1,0 +1,65 @@
+# Migrations and the test suite, against the same throwaway Postgres a
+# developer gets from `docker compose -f docker-compose.test.yml up -d --wait`.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    name: migrations + tests
+    runs-on: ubuntu-latest
+
+    env:
+      # The throwaway database from docker-compose.test.yml - its port and its
+      # database name, neither of which the dev stack uses.
+      DATABASE_URL: postgresql+psycopg://postgres:postgres@localhost:55432/hijack_takeaway_test
+      # Real secrets are per-environment and never committed; this one exists
+      # only so the app boots in CI, where every token is thrown away with the
+      # runner. `.env` is not committed, so Settings reads these.
+      JWT_SECRET: ci-only-secret-regenerated-per-environment-in-real-deployments
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements.lock
+
+      - name: Install pinned dependencies
+        # From the lockfile, not the ranges a resolver would pick today: CI
+        # must run the versions M0 froze. The project itself goes on top with
+        # --no-deps so nothing can quietly re-resolve them.
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.lock
+          pip install -e . --no-deps
+
+      - name: Start the throwaway test database
+        # --wait blocks on the healthcheck, so the next step runs against a
+        # server that is already accepting connections.
+        run: docker compose -f docker-compose.test.yml up -d --wait
+
+      - name: Run migrations
+        run: alembic upgrade head
+
+      - name: Run tests
+        # M7's floor, on the two layers it names. Missing lines are printed so
+        # a drop is actionable from the log alone.
+        run: |
+          pytest \
+            --cov=app/services \
+            --cov=app/api/routers \
+            --cov-report=term-missing \
+            --cov-fail-under=80
+
+      - name: Tear down the test database
+        # `always()` so a failed test run still cleans up. `-v` is belt and
+        # braces: the data directory is a tmpfs, so there is no volume to drop.
+        if: always()
+        run: docker compose -f docker-compose.test.yml down -v

@@ -4,7 +4,7 @@ Minimal FastAPI backend for a takeaway platform: customers browse restaurants & 
 
 ## Status
 
-Milestones M0–M5 are merged into `main`. M6 is built and green on `feat/06-admin`, awaiting its PR (223 tests passing).
+All milestones are merged or ready to merge — 280 tests passing.
 
 - [x] M0: Scaffolding
 - [x] M1: Models + migrations
@@ -13,17 +13,11 @@ Milestones M0–M5 are merged into `main`. M6 is built and green on `feat/06-adm
 - [x] M4: Order placement
 - [x] M5: Status transitions
 - [x] M6: Admin endpoints
-- [ ] M7: Hardening + CI — partially delivered (see below)
+- [x] M7: Hardening + CI
 
-**Delivered ahead of its milestone:** [`app/db/seed.py`](app/db/seed.py) (an M7 item) landed with M3, and [`app/core/errors.py`](app/core/errors.py) landed with M2 as a two-class stub because `decode_token` needed `CredentialsError`.
+**Delivered ahead of its milestone:** [`app/db/seed.py`](app/db/seed.py) (an M7 item) landed with M3, and [`app/core/errors.py`](app/core/errors.py) landed with M2 as a two-class stub because `decode_token` needed `CredentialsError`. M7 completed that hierarchy and registered the handlers.
 
-**Not implemented yet** — described in [PLAN.md](documentation/PLAN.md), absent from the code:
-
-- Exception handlers for the `AppError` hierarchy; nothing is registered on the app, so error shapes are FastAPI's defaults
-- Structured logging with redaction, and CORS middleware
-- `tests/test_e2e.py`, `docker-compose.test.yml`, `.github/workflows/ci.yml` — there is no CI; the suite runs locally only
-
-**Known bug, not fixed** — M3's `RestaurantUpdate` and `ItemUpdate` accept an explicit `null` for columns that are NOT NULL, so `PATCH /restaurants/{id}` with `{"name": null}` (likewise `address`, `is_active`, and `PATCH /items/{id}`'s `name`, `price`, `is_available`) reaches the database and returns 500 instead of 422. `None` is how those schemas spell "field absent", so it cannot also be a value. Found while building M6, where [`UserAdminUpdate`](app/schemas/user.py) rejects the same input with 422; left alone in M3's schemas because they are outside M6's scope.
+**Fixed in M7** — M3's `RestaurantUpdate` and `ItemUpdate` used to accept an explicit `null` for columns that are NOT NULL, so `PATCH /restaurants/{id}` with `{"name": null}` (likewise `address`, `is_active`, and `PATCH /items/{id}`'s `name`, `price`, `is_available`) reached the database and returned 500 instead of 422. `None` is how those schemas spell "field absent", so it cannot also be a value. Found while building M6, where [`UserAdminUpdate`](app/schemas/user.py) already rejected the same input with 422, and left alone then as outside M6's scope. Both schemas now carry the same `reject_an_explicit_null` validator — see [null in a PATCH body](#null-in-a-patch-body).
 
 ## Tech Stack
 
@@ -44,7 +38,8 @@ app/
   main.py                  # app factory, router wiring, GET /health
   core/config.py           # Settings (pydantic-settings), cached get_settings()
   core/security.py         # pwdlib hashing + pyjwt encode/decode
-  core/errors.py           # AppError, CredentialsError (stub; no handlers yet)
+  core/errors.py           # AppError hierarchy + exception handlers
+  core/logging.py          # JSON formatter, redaction filter, request logging
   db/base.py               # DeclarativeBase + model imports for Alembic
   db/session.py            # engine, SessionLocal, get_db
   db/seed.py               # dev seed: admin + 2 restaurants with menus
@@ -54,7 +49,7 @@ app/
   api/routers/             # auth, restaurants, orders, admin
   services/                # order_service, transitions
 alembic/versions/          # 0001_initial.py — all 5 tables + enum types
-tests/                     # 223 tests
+tests/                     # 280 tests
 ```
 
 ## Getting Started
@@ -75,6 +70,14 @@ The app reads its settings from `.env` and **refuses to start without them** —
 cp .env.example .env
 python -c "import secrets; print(secrets.token_urlsafe(64))"   # paste into JWT_SECRET
 ```
+
+| Variable | Default | Notes |
+| --- | --- | --- |
+| `DATABASE_URL` | none — required | fails `alembic`, `uvicorn` and `pytest` alike if unset |
+| `JWT_SECRET` | none — required | generate per environment; the app refuses to start without it |
+| `JWT_ALGORITHM` | `HS256` | decoding is pinned to an `HS256` allowlist regardless |
+| `ACCESS_TOKEN_EXPIRE_MINUTES` | `30` | |
+| `CORS_ORIGINS` | `["*"]` | JSON list; narrow it per deployment, e.g. `CORS_ORIGINS=["https://app.example.com"]` |
 
 ### 3. Start Postgres
 
@@ -103,22 +106,50 @@ Interactive docs at http://127.0.0.1:8000/docs — the Authorize button drives t
 ## Tests
 
 ```bash
+docker compose -f docker-compose.test.yml up -d --wait
+DATABASE_URL=postgresql+psycopg://postgres:postgres@localhost:55432/hijack_takeaway_test alembic upgrade head
 pytest
+docker compose -f docker-compose.test.yml down -v    # cleanup; leaves no volume
 ```
 
-223 tests, ~16s. Each test runs inside a transaction that is rolled back afterwards, so the suite leaves no rows behind.
+280 tests, ~17s. Each test runs inside a transaction that is rolled back afterwards, so the suite leaves no rows behind.
 
-Coverage on the layers M7 sets a floor for:
+`pytest` needs no environment of its own: [tests/conftest.py](tests/conftest.py) injects the throwaway database URL unless `DATABASE_URL` already names one, and an injected environment variable outranks `.env`. Only `alembic` needs the URL spelled out, since it reads the app's own settings.
+
+[docker-compose.test.yml](docker-compose.test.yml) has its own compose project, service (`postgres-test`), database and host port (55432), and keeps its data directory on `tmpfs` — so it cannot reach the dev database on 5432, and there is no volume to remove afterwards. `--wait` blocks on the healthcheck, so `alembic` starts against a server that is already accepting connections.
+
+### The suite will not run against a non-test database
+
+`assert_is_a_test_database` in [tests/conftest.py](tests/conftest.py) allows any database whose name ends in `_test`, plus M0's `hijack_takeaway`. Anything else — `hijack_takeaway_dev`, a staging URL, a production one — aborts collection before a single connection is opened:
+
+```
+RuntimeError: Refusing to run the test suite against database 'hijack_takeaway_dev':
+it is not a test database.
+```
+
+That is what makes "running the suite does not touch dev data" a property of the code rather than a convention in this file. `DATABASE_URL=$DEV_DB pytest` — the mistake that cost M5 an afternoon of duplicate-key errors — now fails loudly instead of writing to seeded data.
+
+To run against the database from `docker compose up` instead, name it explicitly:
 
 ```bash
-pytest --cov=app/services --cov=app/api/routers --cov-report=term
+DATABASE_URL=postgresql+psycopg://postgres:postgres@localhost:5432/hijack_takeaway pytest
 ```
 
-Currently 99% (`app/services/` + `app/api/routers/`), against M7's ≥80% bar.
+### Coverage
+
+```bash
+pytest --cov=app/services --cov=app/api/routers --cov-report=term-missing
+```
+
+99% on `app/services/` + `app/api/routers/`, against M7's ≥80% bar. The floor is enforced in CI with `--cov-fail-under=80` rather than in `pyproject.toml`, so a plain local `pytest` stays fast and collects no coverage.
+
+### CI
+
+[.github/workflows/ci.yml](.github/workflows/ci.yml) runs on every push to `main` and every PR into it: install from [requirements.lock](requirements.lock) → start the throwaway Postgres → `alembic upgrade head` → `pytest` with the coverage gate → tear the database down. The teardown is `if: always()`, so a red run cleans up too.
 
 ## Seeding (dev database only)
 
-**Do not seed the database pytest uses.** `seed()` writes `admin@example.com`, which is the exact address conftest's `admin` fixture inserts — seeding `hijack_takeaway` makes the suite fail with duplicate-key errors on `ix_users_email`. Seed a separate database and point the server at it explicitly:
+`seed()` writes `admin@example.com`, the exact address conftest's `admin` fixture inserts, so a seeded database and the test suite cannot share a home — seeding `hijack_takeaway` makes the suite fail with duplicate-key errors on `ix_users_email`. Since M7 the suite defaults to the throwaway database and [refuses a non-test one outright](#the-suite-will-not-run-against-a-non-test-database), so this is now enforced rather than advised. Seed a separate database and point the server at it explicitly:
 
 ```bash
 # One-time: docker-compose only creates hijack_takeaway, so create the dev DB yourself
@@ -132,7 +163,7 @@ DATABASE_URL=$DEV_DB uvicorn app.main:app --reload
 
 Seeding is idempotent by name and email, so re-running it after a migration adds nothing. It creates `admin@example.com` / `admin123` (a dev placeholder, never a credential), Pizza Place (Margherita 12.99, Pepperoni 14.99) and Burger Joint (Cheeseburger 9.99, Fries 3.99).
 
-M7 replaces this split with a throwaway `docker-compose.test.yml`.
+Since M7 there is a simpler option: run the suite against the throwaway database from [docker-compose.test.yml](docker-compose.test.yml) (see [Tests](#tests)), and the split stops mattering — `hijack_takeaway` can be seeded freely once `pytest` no longer runs there.
 
 ## API
 
@@ -148,9 +179,9 @@ M7 replaces this split with a throwaway `docker-compose.test.yml`.
 | GET | `/restaurants/{id}` | public | unknown id → 404; answers for inactive restaurants too |
 | GET | `/restaurants/{id}/items` | public | available items only; `?include_unavailable=true` needs admin (401 anonymous, 403 non-admin) |
 | POST | `/restaurants` | admin | 201 |
-| PATCH | `/restaurants/{id}` | admin | applies only the fields sent |
+| PATCH | `/restaurants/{id}` | admin | applies only the fields sent; an explicit `null` for a NOT NULL field → 422 |
 | POST | `/restaurants/{id}/items` | admin | 201 |
-| PATCH | `/items/{id}` | admin | also toggles `is_available` |
+| PATCH | `/items/{id}` | admin | also toggles `is_available`; same `null` rule |
 | POST | `/orders` | auth | 201; validates the basket against the live menu, snapshots prices |
 | GET | `/orders` | auth | own orders only; `limit` (1–100, default 20) / `offset`; newest first |
 | GET | `/orders/{id}` | auth | owner or admin; someone else's order reads as 404, not 403 |
@@ -163,6 +194,22 @@ M7 replaces this split with a throwaway `docker-compose.test.yml`.
 Order status moves one step at a time: `pending → accepted → out_for_delivery → delivered`. `delivered` is terminal; there is no cancellation in this scope.
 
 `order_items.unit_price` is snapshotted at order time, so re-pricing a dish never restates what a customer was charged.
+
+### `null` in a PATCH body
+
+Every PATCH body here is a schema whose fields all default to `None`, and the route applies `model_dump(exclude_unset=True)` — so `None` is how these schemas spell "field absent", and a field left out of the body is left alone in the row.
+
+That means `None` cannot also be a value. For a column that is NOT NULL, sending an explicit `null` would otherwise mark the field as set and carry the null down to an UPDATE the database refuses, turning bad input into a 500. A `reject_an_explicit_null` validator on [`RestaurantUpdate`](app/schemas/restaurant.py), [`ItemUpdate`](app/schemas/restaurant_item.py) and [`UserAdminUpdate`](app/schemas/user.py) answers 422 instead:
+
+| Field | Sending `null` |
+| --- | --- |
+| `name`, `address`, `is_active` on a restaurant | 422 |
+| `name`, `price`, `is_available` on an item | 422 |
+| `role`, `is_active` on a user | 422 |
+| `phone` on a restaurant | 200 — clears the number |
+| `description` on an item | 200 — clears the text |
+
+The two nullable columns are deliberately outside the validator: there, a null is a real value, and clearing a field has to stay possible. Only an explicitly sent null reaches the validator — Pydantic does not validate defaults, so an omitted field keeps its `None` and stays excluded.
 
 ### Admin listings
 
@@ -185,6 +232,32 @@ All three `/admin` listings answer with the same envelope, where `total` counts 
 `GET /admin/restaurants/{id}/orders` is the same page narrowed to one restaurant, with the restaurant looked up first so an unknown id is a 404 instead of silence. An inactive restaurant still has an order book.
 
 `PATCH /admin/users/{id}` edits the role and the activation flag and nothing else — an `email`, `full_name` or `hashed_password` in the body is ignored. An omitted field is left alone; an explicit `null` is 422, because `null` is how absence is spelled. Deactivation takes effect immediately, including on tokens already issued: `get_current_user` re-reads `is_active`, so no blacklist is involved. Nothing prevents an admin from demoting or deactivating themselves — the plan names no last-admin guard, so none was invented.
+
+## Errors and logging
+
+Every expected failure answers in one shape:
+
+```json
+{ "detail": "Cannot move an order from pending to delivered" }
+```
+
+Services raise from the `AppError` hierarchy in [app/core/errors.py](app/core/errors.py) — `NotFoundError` (404), `BusinessRuleError` (400), `ConflictError` (409), `CredentialsError` (401, with `WWW-Authenticate: Bearer`) — and a handler registered in the app factory renders each one, which is what keeps `fastapi` out of the service layer. Routers still raise FastAPI's `HTTPException` for plumbing (a missing row, a forbidden role); it produces the same body.
+
+Two deliberate exceptions to the single shape:
+
+- **422** keeps FastAPI's list of per-field errors under `detail` — more useful than one sentence, and the API's answer since M0.
+- **500** is always `{"detail": "Internal server error"}`. The traceback goes to the log and never to the response: a stack trace in a body hands over the file layout, the library versions and often the SQL.
+
+Logs are JSON lines, one object per record, with a line per request carrying `method`, `path`, `status_code` and `duration_ms` — metadata only. Bodies are never read into a record, and the path is logged without its query string. A redaction filter on the handler blanks anything filed under `Authorization`, `Cookie`, `Set-Cookie`, `password`, `token`, `secret` and their neighbours, then scrubs credential-shaped text (`Bearer …`, `password=…`) out of message strings as a second line of defence.
+
+## Security notes
+
+- **JWT secret** — no default; the app refuses to start without `JWT_SECRET`. Generate one per environment (`python -c "import secrets; print(secrets.token_urlsafe(64))"`) and keep it out of git — `.env` is gitignored.
+- **Tokens** — HS256 only, with the algorithm passed as an explicit allowlist on every decode, so a token declaring `alg: none` or `HS512` is rejected whatever `JWT_ALGORITHM` says. `sub` is the user id, never the email. Access tokens expire after `ACCESS_TOKEN_EXPIRE_MINUTES` (default 30); there are no refresh tokens and no revocation list by design, and a deactivated account is refused on its next request because `get_current_user` re-reads `is_active`.
+- **Passwords** — Argon2 via pwdlib, one way. No schema or endpoint ever returns the hash.
+- **CORS** — `CORS_ORIGINS` defaults to `["*"]` with credentials disabled. The wildcard is defensible only because this API authenticates with a Bearer header the client attaches deliberately, never a cookie the browser would send on its own; narrow it to your real origins in production regardless.
+- **Logs** — no bodies, no headers, and a redaction filter over everything that is written. See above.
+- **Failure codes** — authentication failures answer 401 with a generic detail and `WWW-Authenticate: Bearer`; authorization failures answer 403. An unknown email and a wrong password are indistinguishable, so login cannot be used to enumerate accounts.
 
 ## Documentation
 

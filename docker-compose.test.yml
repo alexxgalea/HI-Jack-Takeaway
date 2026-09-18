@@ -1,0 +1,35 @@
+# Throwaway Postgres for the test suite - CI and local runs alike.
+#
+# Everything here is deliberately different from docker-compose.yml: its own
+# compose project, its own service name, its own database name, its own port.
+# The dev stack can be up at the same time and the two cannot meet. There is no
+# `volumes:` section at all, so `down` leaves nothing behind to clean up later.
+name: hijack-takeaway-test
+
+services:
+  postgres-test:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: hijack_takeaway_test
+      # initdb refuses a data directory it does not own, and the tmpfs mount
+      # point below belongs to root - so PGDATA points one level inside it,
+      # where initdb creates the directory itself with the 0700 it wants.
+      PGDATA: /var/lib/postgresql/data/pgdata
+    ports:
+      # Not 5432: the dev database already holds that, and a test run that
+      # silently connected to it would drop real rows on the floor.
+      - "55432:5432"
+    tmpfs:
+      # The data directory never touches the disk. A crashed or killed run
+      # leaves no volume, no stale cluster and nothing to `docker volume rm`.
+      - /var/lib/postgresql/data
+    healthcheck:
+      # What `up -d --wait` blocks on, so CI starts the migration when the
+      # server is actually accepting connections rather than after a sleep.
+      test: ["CMD-SHELL", "pg_isready -U postgres -d hijack_takeaway_test"]
+      interval: 2s
+      timeout: 3s
+      retries: 15
+      start_period: 5s

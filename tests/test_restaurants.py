@@ -436,6 +436,87 @@ async def test_a_restaurant_without_a_name_is_refused(
     assert response.status_code == 422
 
 
+@pytest.mark.parametrize(
+    "body",
+    [{"name": None}, {"address": None}, {"is_active": None}],
+    ids=["null-name", "null-address", "null-is-active"],
+)
+async def test_a_null_for_a_not_null_restaurant_column_is_422(
+    client: AsyncClient,
+    db_session: Session,
+    restaurant: Restaurant,
+    admin_token: str,
+    body: dict[str, object],
+) -> None:
+    # `None` is how RestaurantUpdate spells "field absent", so it cannot also be
+    # a value: without the schema's guard these reach the database as an UPDATE
+    # it refuses, and bad input comes back as a 500.
+    response = await client.patch(
+        f"/restaurants/{restaurant.id}", json=body, headers=auth_header(admin_token)
+    )
+    assert response.status_code == 422
+
+    db_session.refresh(restaurant)
+    assert restaurant.name == "Trattoria"
+    assert restaurant.address == "1 Via Roma"
+    assert restaurant.is_active is True
+
+
+@pytest.mark.parametrize(
+    "body",
+    [{"name": None}, {"price": None}, {"is_available": None}],
+    ids=["null-name", "null-price", "null-is-available"],
+)
+async def test_a_null_for_a_not_null_item_column_is_422(
+    client: AsyncClient,
+    db_session: Session,
+    available_item: RestaurantItem,
+    admin_token: str,
+    body: dict[str, object],
+) -> None:
+    response = await client.patch(
+        f"/items/{available_item.id}",
+        json=body,
+        headers=auth_header(admin_token),
+    )
+    assert response.status_code == 422
+
+    db_session.refresh(available_item)
+    assert available_item.name == "Margherita"
+    assert available_item.price == Decimal("32.50")
+    assert available_item.is_available is True
+
+
+async def test_a_null_still_clears_a_nullable_column(
+    client: AsyncClient,
+    db_session: Session,
+    restaurant: Restaurant,
+    available_item: RestaurantItem,
+    admin_token: str,
+) -> None:
+    # The other half of the rule: `phone` and `description` are nullable, so a
+    # null there is a real value and has to keep working.
+    cleared_phone = await client.patch(
+        f"/restaurants/{restaurant.id}",
+        json={"phone": None},
+        headers=auth_header(admin_token),
+    )
+    assert cleared_phone.status_code == 200
+    assert cleared_phone.json()["phone"] is None
+
+    cleared_description = await client.patch(
+        f"/items/{available_item.id}",
+        json={"description": None},
+        headers=auth_header(admin_token),
+    )
+    assert cleared_description.status_code == 200
+    assert cleared_description.json()["description"] is None
+
+    db_session.refresh(restaurant)
+    db_session.refresh(available_item)
+    assert restaurant.phone is None
+    assert available_item.description is None
+
 # --- conventions ----------------------------------------------------------
 
 

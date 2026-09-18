@@ -1,6 +1,6 @@
-from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
+from app.core.errors import ConflictError
 from app.models.enums import OrderStatus
 from app.models.order import Order
 
@@ -34,11 +34,8 @@ def assert_transition(current: OrderStatus, target: OrderStatus) -> None:
     to know what it had already moved on to.
     """
     if not can_transition(current, target):
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=(
-                f"Cannot move an order from {current.value} to {target.value}"
-            ),
+        raise ConflictError(
+            f"Cannot move an order from {current.value} to {target.value}"
         )
 
 
