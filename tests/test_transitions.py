@@ -61,9 +61,7 @@ async def _place_order(
     return response.json()["id"]
 
 
-async def _set_status(
-    client: AsyncClient, token: str, order_id: int, target: OrderStatus
-):
+async def _set_status(client: AsyncClient, token: str, order_id: int, target: OrderStatus):
     return await client.patch(
         f"/orders/{order_id}/status",
         headers=auth_header(token),
@@ -108,12 +106,8 @@ def test_delivered_is_terminal() -> None:
 
 @pytest.mark.parametrize("current", list(OrderStatus))
 @pytest.mark.parametrize("target", list(OrderStatus))
-def test_can_transition_matches_the_table(
-    current: OrderStatus, target: OrderStatus
-) -> None:
-    assert can_transition(current, target) is (
-        target in ALLOWED_TRANSITIONS[current]
-    )
+def test_can_transition_matches_the_table(current: OrderStatus, target: OrderStatus) -> None:
+    assert can_transition(current, target) is (target in ALLOWED_TRANSITIONS[current])
 
 
 def test_no_status_may_transition_to_itself() -> None:
@@ -153,18 +147,12 @@ async def test_the_full_happy_path_ends_delivered(
     assert reread.json()["status"] == OrderStatus.delivered.value
 
 
-async def test_skipping_a_step_is_409(
-    client: AsyncClient, admin_token: str, order_id: int
-) -> None:
-    response = await _set_status(
-        client, admin_token, order_id, OrderStatus.delivered
-    )
+async def test_skipping_a_step_is_409(client: AsyncClient, admin_token: str, order_id: int) -> None:
+    response = await _set_status(client, admin_token, order_id, OrderStatus.delivered)
     assert response.status_code == 409
 
 
-async def test_going_backwards_is_409(
-    client: AsyncClient, admin_token: str, order_id: int
-) -> None:
+async def test_going_backwards_is_409(client: AsyncClient, admin_token: str, order_id: int) -> None:
     await _drive_to(client, admin_token, order_id, OrderStatus.delivered)
 
     response = await _set_status(client, admin_token, order_id, OrderStatus.pending)
@@ -201,9 +189,7 @@ async def test_the_endpoint_follows_the_transition_matrix(
 # --- authorization --------------------------------------------------------
 
 
-async def test_non_admin_is_403(
-    client: AsyncClient, user_token: str, order_id: int
-) -> None:
+async def test_non_admin_is_403(client: AsyncClient, user_token: str, order_id: int) -> None:
     # The owner of the order is still not the one who moves it.
     response = await _set_status(client, user_token, order_id, OrderStatus.accepted)
     assert response.status_code == 403
@@ -240,9 +226,7 @@ async def test_a_status_outside_the_enum_is_422(
     assert response.status_code == 422
 
 
-async def test_an_empty_body_is_422(
-    client: AsyncClient, admin_token: str, order_id: int
-) -> None:
+async def test_an_empty_body_is_422(client: AsyncClient, admin_token: str, order_id: int) -> None:
     response = await client.patch(
         f"/orders/{order_id}/status", headers=auth_header(admin_token), json={}
     )
@@ -250,9 +234,7 @@ async def test_an_empty_body_is_422(
 
 
 async def test_unknown_order_is_404(client: AsyncClient, admin_token: str) -> None:
-    response = await _set_status(
-        client, admin_token, 10_000_000, OrderStatus.accepted
-    )
+    response = await _set_status(client, admin_token, 10_000_000, OrderStatus.accepted)
     assert response.status_code == 404
 
 
@@ -262,9 +244,7 @@ async def test_unknown_order_is_404(client: AsyncClient, admin_token: str) -> No
 async def test_a_move_bumps_updated_at_and_leaves_the_rest_alone(
     client: AsyncClient, admin_token: str, order_id: int
 ) -> None:
-    before = (
-        await client.get(f"/orders/{order_id}", headers=auth_header(admin_token))
-    ).json()
+    before = (await client.get(f"/orders/{order_id}", headers=auth_header(admin_token))).json()
 
     moved = await _set_status(client, admin_token, order_id, OrderStatus.accepted)
     after = moved.json()

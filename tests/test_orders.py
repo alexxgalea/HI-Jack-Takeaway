@@ -109,8 +109,7 @@ async def _place_order(
             "restaurant_id": restaurant.id,
             "delivery_address": address,
             "items": [
-                {"restaurant_item_id": item.id, "quantity": quantity}
-                for item, quantity in lines
+                {"restaurant_item_id": item.id, "quantity": quantity} for item, quantity in lines
             ],
         },
     )
@@ -126,9 +125,7 @@ async def test_valid_order_returns_201_with_items_and_summed_total(
     margherita: RestaurantItem,
     pepperoni: RestaurantItem,
 ) -> None:
-    response = await _place_order(
-        client, user_token, restaurant, [(margherita, 2), (pepperoni, 1)]
-    )
+    response = await _place_order(client, user_token, restaurant, [(margherita, 2), (pepperoni, 1)])
     assert response.status_code == 201
 
     body = response.json()
@@ -243,9 +240,7 @@ async def test_inactive_restaurant_is_rejected(
     assert response.status_code == 400
 
 
-async def test_unknown_restaurant_is_404(
-    client: AsyncClient, user_token: str
-) -> None:
+async def test_unknown_restaurant_is_404(client: AsyncClient, user_token: str) -> None:
     response = await client.post(
         "/orders",
         headers=auth_header(user_token),
@@ -266,9 +261,7 @@ async def test_non_positive_quantity_is_unprocessable(
     margherita: RestaurantItem,
     quantity: int,
 ) -> None:
-    response = await _place_order(
-        client, user_token, restaurant, [(margherita, quantity)]
-    )
+    response = await _place_order(client, user_token, restaurant, [(margherita, quantity)])
     assert response.status_code == 422
 
 
@@ -290,9 +283,7 @@ async def test_a_rejected_basket_writes_no_order(
 ) -> None:
     # The good line comes first: if the order were written before the basket
     # was fully checked, a half-built row would survive the rejection.
-    response = await _place_order(
-        client, user_token, restaurant, [(margherita, 1), (sold_out, 1)]
-    )
+    response = await _place_order(client, user_token, restaurant, [(margherita, 1), (sold_out, 1)])
     assert response.status_code == 400
 
     listing = await client.get("/orders", headers=auth_header(user_token))
@@ -349,9 +340,7 @@ async def test_reading_another_users_order_as_non_admin_is_404(
     placed = await _place_order(client, user_token, restaurant, [(margherita, 1)])
     order_id = placed.json()["id"]
 
-    response = await client.get(
-        f"/orders/{order_id}", headers=auth_header(other_user_token)
-    )
+    response = await client.get(f"/orders/{order_id}", headers=auth_header(other_user_token))
     assert response.status_code == 404
 
 
@@ -400,15 +389,12 @@ async def test_listing_is_paginated_newest_first(
     margherita: RestaurantItem,
 ) -> None:
     placed = [
-        (await _place_order(client, user_token, restaurant, [(margherita, 1)]))
-        .json()["id"]
+        (await _place_order(client, user_token, restaurant, [(margherita, 1)])).json()["id"]
         for _ in range(3)
     ]
     newest_first = list(reversed(placed))
 
-    first_page = await client.get(
-        "/orders", headers=auth_header(user_token), params={"limit": 2}
-    )
+    first_page = await client.get("/orders", headers=auth_header(user_token), params={"limit": 2})
     assert [order["id"] for order in first_page.json()] == newest_first[:2]
 
     second_page = await client.get(
@@ -449,9 +435,7 @@ async def test_order_rows_snapshot_price_and_quantity(
     margherita: RestaurantItem,
     pepperoni: RestaurantItem,
 ) -> None:
-    placed = await _place_order(
-        client, user_token, restaurant, [(margherita, 2), (pepperoni, 1)]
-    )
+    placed = await _place_order(client, user_token, restaurant, [(margherita, 2), (pepperoni, 1)])
 
     order = db_session.get(Order, placed.json()["id"])
     assert order is not None

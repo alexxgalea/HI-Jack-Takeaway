@@ -21,18 +21,14 @@ items_router = APIRouter(prefix="/items", tags=["restaurants"])
 def _get_restaurant(db: Session, restaurant_id: int) -> Restaurant:
     restaurant = db.get(Restaurant, restaurant_id)
     if restaurant is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Restaurant not found"
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Restaurant not found")
     return restaurant
 
 
 def _get_item(db: Session, item_id: int) -> RestaurantItem:
     item = db.get(RestaurantItem, item_id)
     if item is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Item not found"
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Item not found")
     return item
 
 
@@ -100,9 +96,7 @@ def list_restaurant_items(
 
 
 @router.post("", response_model=RestaurantOut, status_code=status.HTTP_201_CREATED)
-def create_restaurant(
-    payload: RestaurantCreate, db: DbSession, admin: AdminUser
-) -> Restaurant:
+def create_restaurant(payload: RestaurantCreate, db: DbSession, admin: AdminUser) -> Restaurant:
     restaurant = Restaurant(**payload.model_dump())
     db.add(restaurant)
     db.commit()
@@ -121,9 +115,7 @@ def update_restaurant(
     return restaurant
 
 
-@router.post(
-    "/{restaurant_id}/items", response_model=ItemOut, status_code=status.HTTP_201_CREATED
-)
+@router.post("/{restaurant_id}/items", response_model=ItemOut, status_code=status.HTTP_201_CREATED)
 def create_restaurant_item(
     restaurant_id: int, payload: ItemCreate, db: DbSession, admin: AdminUser
 ) -> RestaurantItem:

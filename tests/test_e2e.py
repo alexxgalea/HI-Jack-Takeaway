@@ -89,9 +89,7 @@ async def test_register_login_browse_order_and_delivery(
     order = placed.json()
     order_id = order["id"]
     assert order["status"] == "pending"
-    assert Decimal(order["total_amount"]) == prices["Margherita"] * 2 + prices[
-        "Pepperoni"
-    ]
+    assert Decimal(order["total_amount"]) == prices["Margherita"] * 2 + prices["Pepperoni"]
 
     # --- the admin walks it down the pipeline, one legal step at a time ---
     for target in ("accepted", "out_for_delivery", "delivered"):
@@ -109,9 +107,7 @@ async def test_register_login_browse_order_and_delivery(
 
     book = await client.get(f"/admin/orders?restaurant_id={restaurant_id}", headers=admin)
     assert book.status_code == 200
-    assert [(row["id"], row["status"]) for row in book.json()["items"]] == [
-        (order_id, "delivered")
-    ]
+    assert [(row["id"], row["status"]) for row in book.json()["items"]] == [(order_id, "delivered")]
 
     # The pipeline is one-way: `delivered` is the end of the line.
     refused = await client.patch(

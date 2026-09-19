@@ -1,0 +1,14 @@
+# Keeps the build context to what the image actually needs. `tests` and
+# `documentation` are deliberate: neither ships in the runtime image, and
+# excluding them means editing either one does not invalidate the build cache.
+.git
+.venv
+# `**/` because a bare `__pycache__` matches only the repository root:
+# Docker's ignore patterns are path-matched, not recursive, so the host's
+# alembic/versions/__pycache__ would otherwise ship inside the image.
+**/__pycache__
+.pytest_cache
+htmlcov
+.env
+documentation
+tests

@@ -1,5 +1,6 @@
-# Migrations and the test suite, against the same throwaway Postgres a
-# developer gets from `docker compose -f docker-compose.test.yml up -d --wait`.
+# Two independent gates. `lint` needs nothing but a checkout; `test` runs the
+# migrations and the suite against the same throwaway Postgres a developer gets
+# from `docker compose -f docker-compose.test.yml up -d --wait`.
 name: CI
 
 on:
@@ -63,3 +64,46 @@ jobs:
         # braces: the data directory is a tmpfs, so there is no volume to drop.
         if: always()
         run: docker compose -f docker-compose.test.yml down -v
+
+  lint:
+    name: ruff + mypy
+    runs-on: ubuntu-latest
+    # No `env:` and no services: ruff reads files and mypy analyses them
+    # without importing `app`, so nothing here needs a database or a secret.
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements.lock
+
+      - name: Install pinned dependencies
+        # The lockfile first: `mypy --strict` resolves fastapi, pydantic and
+        # sqlalchemy for real, so it needs the same versions M0 froze, not
+        # stubs. `.[dev]` then adds ruff and mypy, whose pins live in
+        # pyproject because they are tooling rather than runtime dependencies.
+        # Deliberately not `--no-deps` on that second line: the flag skips
+        # extras as well, which would install neither tool and leave the steps
+        # below failing on `command not found`. With the lockfile already in
+        # place the resolve is additive - it changes no pinned version.
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.lock
+          pip install -e ".[dev]"
+
+      - name: Lint
+        run: ruff check .
+
+      - name: Check formatting
+        # Fails the PR rather than reformatting it, so applying the style stays
+        # a deliberate commit and never arrives as a surprise diff from CI.
+        run: ruff format --check .
+
+      - name: Type-check
+        # `strict` and `warn_unused_ignores` live in `[tool.mypy]`, so the
+        # command carries no flags. `app` only - alembic's generated revisions
+        # are not part of the typed surface.
+        run: mypy app

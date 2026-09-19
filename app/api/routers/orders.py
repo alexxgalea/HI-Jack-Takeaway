@@ -48,9 +48,7 @@ def get_order(order_id: int, db: DbSession, user: CurrentUser) -> Order:
     # Someone else's order reads as absent rather than forbidden: a 403 here
     # would confirm the id exists to anyone willing to count upwards.
     if order is None or (order.customer_id != user.id and user.role != UserRole.admin):
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Order not found"
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Order not found")
     return order
 
 
@@ -65,7 +63,5 @@ def update_order_status(
     """
     order = db.get(Order, order_id)
     if order is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Order not found"
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Order not found")
     return set_order_status(db, order, payload.status)

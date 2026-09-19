@@ -15,5 +15,54 @@ services:
       timeout: 5s
       retries: 10
 
+  api:
+    build: .
+    depends_on:
+      postgres:
+        # Not just "started": the entrypoint runs `alembic upgrade head` as its
+        # first act, which needs a server already accepting connections.
+        condition: service_healthy
+    environment:
+      # The compose service name, not localhost - inside the network the
+      # database is another container, not this one.
+      DATABASE_URL: postgresql+psycopg://postgres:postgres@postgres:5432/hijack_takeaway
+      # So a fresh clone with no .env still boots. Named for what it is: a
+      # value to override in anything that is not a local dev stack.
+      JWT_SECRET: ${JWT_SECRET:-dev-only-not-for-deployment}
+    # No `ports:` on purpose - nginx is the only ingress, and it is also what
+    # makes gunicorn's --forwarded-allow-ips='*' safe.
+    healthcheck:
+      # python:3.12-slim ships no curl, and the point of the slim image is not
+      # to install one for a healthcheck.
+      test:
+        - CMD
+        - python
+        - -c
+        - import urllib.request; urllib.request.urlopen("http://localhost:8000/health")
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      # Covers the first-boot migration, which runs before the port opens.
+      start_period: 30s
+
+  nginx:
+    image: nginx:1-alpine
+    depends_on:
+      api:
+        # Healthy, not merely started: the api entrypoint runs the migrations
+        # before gunicorn binds its port, and nginx resolves this upstream at
+        # config load. Gating on "started" leaves a window where the proxy is
+        # accepting traffic and answering 502.
+        condition: service_healthy
+    ports:
+      # 8080, not 80: binding a port below 1024 needs root, and this has to
+      # come up unprivileged on a developer machine. The only published
+      # application port in the stack.
+      - "8080:80"
+    volumes:
+      # Read-only: nginx never writes its own config, and a container that
+      # cannot rewrite it cannot quietly diverge from what is in the repo.
+      - ./docker/nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+
 volumes:
   hijack_takeaway_pgdata:

@@ -34,9 +34,7 @@ def assert_transition(current: OrderStatus, target: OrderStatus) -> None:
     to know what it had already moved on to.
     """
     if not can_transition(current, target):
-        raise ConflictError(
-            f"Cannot move an order from {current.value} to {target.value}"
-        )
+        raise ConflictError(f"Cannot move an order from {current.value} to {target.value}")
 
 
 def set_order_status(db: Session, order: Order, target: OrderStatus) -> Order:

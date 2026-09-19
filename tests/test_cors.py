@@ -100,9 +100,7 @@ async def test_a_configured_origin_is_allowed(narrowed_client: AsyncClient) -> N
 async def test_an_unconfigured_origin_gets_no_allow_header(
     narrowed_client: AsyncClient,
 ) -> None:
-    response = await narrowed_client.get(
-        "/health", headers={"Origin": "https://evil.example.com"}
-    )
+    response = await narrowed_client.get("/health", headers={"Origin": "https://evil.example.com"})
 
     # The response still arrives - CORS is enforced by the browser, which sees
     # no allow header and refuses to hand the body to the calling page.

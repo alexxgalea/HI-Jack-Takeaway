@@ -210,10 +210,12 @@ Each milestone ends green: `alembic upgrade head && pytest` passes before the ne
 | `feat/05-transitions` | M5 | M5 acceptance |
 | `feat/06-admin` | M6 | M6 acceptance |
 | `feat/07-hardening` | M7 | M7 acceptance |
+| `feat/08-deployment-critical` | M8 - see [PLAN_08_DEPLOYMENT_AND_HARDENING.md](PLAN_08_DEPLOYMENT_AND_HARDENING.md) | M8 acceptance |
 
 - One branch per milestone, branched from `main` after the previous one merges - they are sequential, not parallel, because each milestone builds on the last
 - A branch merges only when its own acceptance criteria pass; the PR description lists them as a checklist
 - Enforcement on `main`: require a PR, require the CI check green, block force-push and deletion. Until CI exists (M7), the check requirement is satisfied by running `alembic upgrade head && pytest` locally and recording the result in the PR.
+- M8 is an amendment to this plan rather than a ninth milestone in it: it closes the two stack items the brief names - Docker/compose, and nginx in front of Gunicorn - that M0-M7 did not cover. Its branch follows the same rules as every other: branched from `main`, PR-merged, its own acceptance checklist in the PR description, CI green before merge
 - Protection applies from `plan/initial` onward - the first commit on `main` should be the initial-commit/README skeleton, before the rule is turned on, so there is a base to branch from
 
 ## Cross-cutting conventions

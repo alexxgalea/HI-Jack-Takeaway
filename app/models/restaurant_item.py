@@ -19,11 +19,7 @@ class RestaurantItem(Base):
     name: Mapped[str] = mapped_column(String(255))
     description: Mapped[str | None] = mapped_column(Text)
     price: Mapped[Decimal] = mapped_column(Numeric(10, 2))
-    is_available: Mapped[bool] = mapped_column(
-        Boolean, default=True, server_default="true"
-    )
+    is_available: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
 
     restaurant: Mapped["Restaurant"] = relationship(back_populates="items")
-    order_items: Mapped[list["OrderItem"]] = relationship(
-        back_populates="restaurant_item"
-    )
+    order_items: Mapped[list["OrderItem"]] = relationship(back_populates="restaurant_item")

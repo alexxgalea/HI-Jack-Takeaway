@@ -78,29 +78,21 @@ def _order_filters(
     return filters
 
 
-def _assert_range_is_ordered(
-    created_from: datetime | None, created_to: datetime | None
-) -> None:
+def _assert_range_is_ordered(created_from: datetime | None, created_to: datetime | None) -> None:
     """Refuse a range that runs backwards.
 
     `created_from` after `created_to` can never match a row, so answering with
     an empty page would look like "no orders" when it is really "no such
     range". 422 puts it where the other malformed-input answers are.
     """
-    if (
-        created_from is not None
-        and created_to is not None
-        and created_from > created_to
-    ):
+    if created_from is not None and created_to is not None and created_from > created_to:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="created_from must not be later than created_to",
         )
 
 
-def _page(
-    db: Session, stmt: Select[tuple[T]], limit: int, offset: int
-) -> tuple[Sequence[T], int]:
+def _page(db: Session, stmt: Select[tuple[T]], limit: int, offset: int) -> tuple[Sequence[T], int]:
     """Run one statement twice: once counted whole, once sliced.
 
     The count is derived from the same statement the page comes from, so the
@@ -109,9 +101,7 @@ def _page(
     query. `order_by(None)` drops the sort first: ordering rows only to count
     them is work Postgres does not need to do.
     """
-    total = db.scalar(
-        select(func.count()).select_from(stmt.order_by(None).subquery())
-    )
+    total = db.scalar(select(func.count()).select_from(stmt.order_by(None).subquery()))
     rows = db.scalars(stmt.limit(limit).offset(offset)).all()
     return rows, total or 0
 
@@ -166,9 +156,7 @@ def list_orders(
         _order_filters(order_status, restaurant_id, customer_id, since, until)
     )
     orders, total = _page(db, stmt, limit, offset)
-    return PaginatedResponse[OrderOut](
-        items=orders, total=total, limit=limit, offset=offset
-    )
+    return PaginatedResponse[OrderOut](items=orders, total=total, limit=limit, offset=offset)  # type: ignore[arg-type]
 
 
 @router.get("/restaurants/{restaurant_id}/orders")
@@ -188,15 +176,11 @@ def list_restaurant_orders(
     to happen.
     """
     if db.get(Restaurant, restaurant_id) is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Restaurant not found"
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Restaurant not found")
 
     stmt = _orders_newest_first([Order.restaurant_id == restaurant_id])
     orders, total = _page(db, stmt, limit, offset)
-    return PaginatedResponse[OrderOut](
-        items=orders, total=total, limit=limit, offset=offset
-    )
+    return PaginatedResponse[OrderOut](items=orders, total=total, limit=limit, offset=offset)  # type: ignore[arg-type]
 
 
 # --- users ----------------------------------------------------------------
@@ -214,15 +198,11 @@ def list_users(
     """
     stmt = select(User).order_by(User.id)
     users, total = _page(db, stmt, limit, offset)
-    return PaginatedResponse[UserOut](
-        items=users, total=total, limit=limit, offset=offset
-    )
+    return PaginatedResponse[UserOut](items=users, total=total, limit=limit, offset=offset)  # type: ignore[arg-type]
 
 
 @router.patch("/users/{user_id}", response_model=UserOut)
-def update_user(
-    user_id: int, payload: UserAdminUpdate, db: DbSession, admin: AdminUser
-) -> User:
+def update_user(user_id: int, payload: UserAdminUpdate, db: DbSession, admin: AdminUser) -> User:
     """Change an account's role or activation. Nothing else is editable here.
 
     Deactivating is the closest thing to deletion in this scope, and it is
@@ -235,9 +215,7 @@ def update_user(
     """
     user = db.get(User, user_id)
     if user is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
 
     for field, value in payload.model_dump(exclude_unset=True).items():
         setattr(user, field, value)

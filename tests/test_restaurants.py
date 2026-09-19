@@ -16,9 +16,7 @@ from tests.test_auth import auth_header
 
 @pytest.fixture
 def restaurant(db_session: Session) -> Restaurant:
-    restaurant = Restaurant(
-        name="Trattoria", address="1 Via Roma", phone="+40 700 000 000"
-    )
+    restaurant = Restaurant(name="Trattoria", address="1 Via Roma", phone="+40 700 000 000")
     db_session.add(restaurant)
     db_session.commit()
     db_session.refresh(restaurant)
@@ -58,9 +56,7 @@ def unavailable_item(db_session: Session, restaurant: Restaurant) -> RestaurantI
 # --- anonymous browsing ---------------------------------------------------
 
 
-async def test_anonymous_can_list_restaurants(
-    client: AsyncClient, restaurant: Restaurant
-) -> None:
+async def test_anonymous_can_list_restaurants(client: AsyncClient, restaurant: Restaurant) -> None:
     response = await client.get("/restaurants")
     assert response.status_code == 200
 
@@ -73,9 +69,7 @@ async def test_anonymous_can_list_restaurants(
 async def test_inactive_restaurant_not_in_public_listing(
     client: AsyncClient, db_session: Session, restaurant: Restaurant
 ) -> None:
-    closed = Restaurant(
-        name="Closed Down", address="9 Shut Street", phone=None, is_active=False
-    )
+    closed = Restaurant(name="Closed Down", address="9 Shut Street", phone=None, is_active=False)
     db_session.add(closed)
     db_session.commit()
     db_session.refresh(closed)
@@ -228,9 +222,7 @@ async def test_writes_by_a_non_admin_return_403(
     user_token: str,
 ) -> None:
     for method, url, payload in _write_requests(restaurant.id, available_item.id):
-        response = await client.request(
-            method, url, json=payload, headers=auth_header(user_token)
-        )
+        response = await client.request(method, url, json=payload, headers=auth_header(user_token))
         assert response.status_code == 403, f"{method} {url}"
 
 
@@ -375,9 +367,7 @@ async def test_unknown_restaurant_id_returns_404_on_every_route(
     assert (await client.get(f"/restaurants/{missing}")).status_code == 404
     assert (await client.get(f"/restaurants/{missing}/items")).status_code == 404
     assert (
-        await client.patch(
-            f"/restaurants/{missing}", json={"name": "Ghost"}, headers=header
-        )
+        await client.patch(f"/restaurants/{missing}", json={"name": "Ghost"}, headers=header)
     ).status_code == 404
     assert (
         await client.post(
@@ -388,9 +378,7 @@ async def test_unknown_restaurant_id_returns_404_on_every_route(
     ).status_code == 404
 
 
-async def test_unknown_item_id_returns_404(
-    client: AsyncClient, admin_token: str
-) -> None:
+async def test_unknown_item_id_returns_404(client: AsyncClient, admin_token: str) -> None:
     response = await client.patch(
         "/items/10000000",
         json={"is_available": False},
@@ -516,6 +504,7 @@ async def test_a_null_still_clears_a_nullable_column(
     db_session.refresh(available_item)
     assert restaurant.phone is None
     assert available_item.description is None
+
 
 # --- conventions ----------------------------------------------------------
 
