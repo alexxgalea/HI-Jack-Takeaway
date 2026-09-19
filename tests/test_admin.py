@@ -25,9 +25,7 @@ from tests.test_auth import auth_header
 # Postgres `now()` is the transaction clock and the `db_session` fixture runs
 # each test inside one transaction, so every default-stamped row in a test
 # shares a single `created_at` and no range could separate them.
-DAYS: tuple[datetime, ...] = tuple(
-    datetime(2026, 1, day, 12, 0, tzinfo=UTC) for day in range(1, 6)
-)
+DAYS: tuple[datetime, ...] = tuple(datetime(2026, 1, day, 12, 0, tzinfo=UTC) for day in range(1, 6))
 
 
 # --- fixtures -------------------------------------------------------------
@@ -51,9 +49,7 @@ def _add_restaurant(db: Session, name: str, address: str) -> Restaurant:
     return restaurant
 
 
-def _add_item(
-    db: Session, restaurant: Restaurant, name: str, price: str
-) -> RestaurantItem:
+def _add_item(db: Session, restaurant: Restaurant, name: str, price: str) -> RestaurantItem:
     item = RestaurantItem(
         restaurant_id=restaurant.id,
         name=name,
@@ -73,9 +69,7 @@ def margherita(db_session: Session, restaurant: Restaurant) -> RestaurantItem:
 
 
 @pytest.fixture
-def cheeseburger(
-    db_session: Session, other_restaurant: Restaurant
-) -> RestaurantItem:
+def cheeseburger(db_session: Session, other_restaurant: Restaurant) -> RestaurantItem:
     return _add_item(db_session, other_restaurant, "Cheeseburger", "9.99")
 
 
@@ -117,11 +111,7 @@ def _add_order(
         total_amount=item.price * quantity,
         created_at=created_at,
         updated_at=created_at,
-        items=[
-            OrderItem(
-                restaurant_item_id=item.id, quantity=quantity, unit_price=item.price
-            )
-        ],
+        items=[OrderItem(restaurant_item_id=item.id, quantity=quantity, unit_price=item.price)],
     )
     db.add(order)
     db.commit()
@@ -255,9 +245,7 @@ def test_the_discovered_route_list_is_the_whole_router() -> None:
 async def test_every_admin_route_rejects_a_non_admin_with_403(
     client: AsyncClient, user_token: str, method: str, path: str
 ) -> None:
-    response = await client.request(
-        method, path, headers=auth_header(user_token), json={}
-    )
+    response = await client.request(method, path, headers=auth_header(user_token), json={})
     assert response.status_code == 403
 
 
@@ -285,9 +273,7 @@ async def test_every_admin_route_rejects_a_deactivated_admin_with_401(
     admin.is_active = False
     db_session.commit()
 
-    response = await client.request(
-        method, path, headers=auth_header(admin_token), json={}
-    )
+    response = await client.request(method, path, headers=auth_header(admin_token), json={})
     assert response.status_code == 401
 
 
@@ -366,9 +352,7 @@ async def test_filtering_by_status(
 async def test_filtering_by_restaurant(
     client: AsyncClient, admin_token: str, spread: Spread, restaurant: Restaurant
 ) -> None:
-    response = await _get(
-        client, admin_token, "/admin/orders", restaurant_id=restaurant.id
-    )
+    response = await _get(client, admin_token, "/admin/orders", restaurant_id=restaurant.id)
     assert set(_ids(response)) == {
         spread.others_pending_pizza.id,
         spread.accepted_pizza.id,
@@ -379,9 +363,7 @@ async def test_filtering_by_restaurant(
 async def test_filtering_by_customer(
     client: AsyncClient, admin_token: str, spread: Spread, other_user: User
 ) -> None:
-    response = await _get(
-        client, admin_token, "/admin/orders", customer_id=other_user.id
-    )
+    response = await _get(client, admin_token, "/admin/orders", customer_id=other_user.id)
     assert set(_ids(response)) == {
         spread.others_pending_pizza.id,
         spread.others_out_burger.id,
@@ -391,9 +373,7 @@ async def test_filtering_by_customer(
 async def test_filtering_from_a_date_is_inclusive_of_that_day(
     client: AsyncClient, admin_token: str, spread: Spread
 ) -> None:
-    response = await _get(
-        client, admin_token, "/admin/orders", created_from=_day(3), limit=100
-    )
+    response = await _get(client, admin_token, "/admin/orders", created_from=_day(3), limit=100)
     assert set(_ids(response)) & spread.ids == {
         spread.others_pending_pizza.id,
         spread.others_out_burger.id,
@@ -403,9 +383,7 @@ async def test_filtering_from_a_date_is_inclusive_of_that_day(
 async def test_filtering_to_a_date_is_inclusive_of_that_day(
     client: AsyncClient, admin_token: str, spread: Spread
 ) -> None:
-    response = await _get(
-        client, admin_token, "/admin/orders", created_to=_day(1), limit=100
-    )
+    response = await _get(client, admin_token, "/admin/orders", created_to=_day(1), limit=100)
     assert set(_ids(response)) & spread.ids == {
         spread.pending_pizza.id,
         spread.accepted_pizza.id,
@@ -435,9 +413,7 @@ async def test_a_naive_bound_is_read_as_utc(
 ) -> None:
     # The same instant with and without its offset must select the same orders,
     # whatever the database session's TimeZone is set to.
-    aware = await _get(
-        client, admin_token, "/admin/orders", created_from=_day(4), limit=100
-    )
+    aware = await _get(client, admin_token, "/admin/orders", created_from=_day(4), limit=100)
     naive = await _get(
         client,
         admin_token,
@@ -456,9 +432,7 @@ async def test_an_offset_bound_is_honoured_not_dropped(
     # would read as 13:00Z, fall after day 5, and cut it out.
     bound = (DAYS[4] + timedelta(hours=1)).isoformat().replace("+00:00", "+01:00")
 
-    response = await _get(
-        client, admin_token, "/admin/orders", created_from=bound, limit=100
-    )
+    response = await _get(client, admin_token, "/admin/orders", created_from=bound, limit=100)
     assert spread.others_out_burger.id in _ids(response)
 
 
@@ -546,9 +520,7 @@ async def test_an_id_that_matches_nothing_is_an_empty_page_not_a_404(
     # A filter is not a lookup: `/admin/orders?restaurant_id=` says "narrow to
     # this", and nothing matching is a legitimate answer. The 404 lives on
     # `/admin/restaurants/{id}/orders`, which does look the restaurant up.
-    response = await _get(
-        client, admin_token, "/admin/orders", restaurant_id=10_000_000
-    )
+    response = await _get(client, admin_token, "/admin/orders", restaurant_id=10_000_000)
     assert response.status_code == 200
     assert response.json()["total"] == 0
 
@@ -579,9 +551,7 @@ async def test_an_invalid_filter_value_is_422(
     assert response.status_code == 422
 
 
-async def test_a_range_that_runs_backwards_is_422(
-    client: AsyncClient, admin_token: str
-) -> None:
+async def test_a_range_that_runs_backwards_is_422(client: AsyncClient, admin_token: str) -> None:
     response = await _get(
         client, admin_token, "/admin/orders", created_from=_day(4), created_to=_day(0)
     )
@@ -658,9 +628,7 @@ async def test_authorization_is_checked_before_the_filters(
 async def test_total_counts_every_match_not_the_rows_returned(
     client: AsyncClient, admin_token: str, spread: Spread, user: User
 ) -> None:
-    response = await _get(
-        client, admin_token, "/admin/orders", customer_id=user.id, limit=1
-    )
+    response = await _get(client, admin_token, "/admin/orders", customer_id=user.id, limit=1)
 
     body = response.json()
     assert len(body["items"]) == 1
@@ -673,9 +641,7 @@ async def test_total_is_the_row_count_the_database_reports(
     client: AsyncClient, db_session: Session, admin_token: str, spread: Spread
 ) -> None:
     response = await _get(client, admin_token, "/admin/orders", limit=1)
-    assert response.json()["total"] == db_session.scalar(
-        select(func.count()).select_from(Order)
-    )
+    assert response.json()["total"] == db_session.scalar(select(func.count()).select_from(Order))
 
 
 async def test_limit_and_offset_are_echoed_back_as_sent(
@@ -712,9 +678,7 @@ async def test_paging_walks_every_match_exactly_once(
 async def test_an_offset_past_the_end_is_an_empty_page_with_the_real_total(
     client: AsyncClient, admin_token: str, spread: Spread, user: User
 ) -> None:
-    response = await _get(
-        client, admin_token, "/admin/orders", customer_id=user.id, offset=99
-    )
+    response = await _get(client, admin_token, "/admin/orders", customer_id=user.id, offset=99)
     body = response.json()
     assert body["items"] == []
     assert body["total"] == 3
@@ -777,9 +741,7 @@ async def test_user_paging_walks_every_account_exactly_once(
 
     walked: list[int] = []
     for offset in range(0, total + 1, 2):
-        walked += _ids(
-            await _get(client, admin_token, "/admin/users", limit=2, offset=offset)
-        )
+        walked += _ids(await _get(client, admin_token, "/admin/users", limit=2, offset=offset))
     assert len(walked) == total == len(set(walked))
     assert {user.id, admin.id, other_user.id} <= set(walked)
 
@@ -964,9 +926,7 @@ async def test_an_invalid_patch_body_is_422(
     assert response.status_code == 422
 
 
-async def test_patching_an_unknown_user_is_404(
-    client: AsyncClient, admin_token: str
-) -> None:
+async def test_patching_an_unknown_user_is_404(client: AsyncClient, admin_token: str) -> None:
     response = await client.patch(
         "/admin/users/10000000",
         headers=auth_header(admin_token),
@@ -1029,9 +989,7 @@ async def test_the_order_book_matches_the_equivalent_filter(
 async def test_the_order_book_is_paginated_newest_first(
     client: AsyncClient, admin_token: str, spread: Spread, restaurant: Restaurant
 ) -> None:
-    first = await _get(
-        client, admin_token, f"/admin/restaurants/{restaurant.id}/orders", limit=2
-    )
+    first = await _get(client, admin_token, f"/admin/restaurants/{restaurant.id}/orders", limit=2)
     second = await _get(
         client,
         admin_token,
@@ -1047,15 +1005,11 @@ async def test_the_order_book_is_paginated_newest_first(
 async def test_a_restaurant_with_no_orders_is_an_empty_page(
     client: AsyncClient, admin_token: str, other_restaurant: Restaurant
 ) -> None:
-    response = await _get(
-        client, admin_token, f"/admin/restaurants/{other_restaurant.id}/orders"
-    )
+    response = await _get(client, admin_token, f"/admin/restaurants/{other_restaurant.id}/orders")
     assert response.json() == {"items": [], "total": 0, "limit": 20, "offset": 0}
 
 
-async def test_an_unknown_restaurant_is_404(
-    client: AsyncClient, admin_token: str
-) -> None:
+async def test_an_unknown_restaurant_is_404(client: AsyncClient, admin_token: str) -> None:
     response = await _get(client, admin_token, "/admin/restaurants/10000000/orders")
     assert response.status_code == 404
 
@@ -1125,9 +1079,7 @@ async def test_an_order_placed_over_http_appears_in_every_admin_view(
             status=OrderStatus.pending.value,
             limit=100,
         ),
-        await _get(
-            client, admin_token, f"/admin/restaurants/{restaurant.id}/orders", limit=100
-        ),
+        await _get(client, admin_token, f"/admin/restaurants/{restaurant.id}/orders", limit=100),
     ]
     for response in everywhere:
         assert order_id in _ids(response), response.text

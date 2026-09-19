@@ -58,11 +58,7 @@ _KEYED_VALUE = re.compile(
 # Everything the logging module itself puts on a record; anything else was
 # passed by the caller as `extra=` and belongs in the JSON output.
 _RESERVED = frozenset(
-    vars(
-        logging.LogRecord(
-            name="", level=0, pathname="", lineno=0, msg="", args=(), exc_info=None
-        )
-    )
+    vars(logging.LogRecord(name="", level=0, pathname="", lineno=0, msg="", args=(), exc_info=None))
 ) | {"message", "asctime", "taskName"}
 
 
@@ -125,9 +121,7 @@ class JsonFormatter(logging.Formatter):
             "logger": record.name,
             "message": record.getMessage(),
         }
-        payload.update(
-            {key: getattr(record, key) for key in set(vars(record)) - _RESERVED}
-        )
+        payload.update({key: getattr(record, key) for key in set(vars(record)) - _RESERVED})
         if record.exc_info:
             # The traceback belongs in the log and nowhere else - the response
             # for the same failure is a bare "Internal server error".
@@ -181,9 +175,7 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
         return response
 
     @staticmethod
-    def _log(
-        logger: logging.Logger, request: Request, status_code: int, started: float
-    ) -> None:
+    def _log(logger: logging.Logger, request: Request, status_code: int, started: float) -> None:
         logger.info(
             "%s %s %s",
             request.method,

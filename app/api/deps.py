@@ -13,9 +13,7 @@ from app.models.user import User
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
 # Same scheme with the 401-on-missing-header turned off, for routes that
 # are public but show more to an admin.
-oauth2_scheme_optional = OAuth2PasswordBearer(
-    tokenUrl="/auth/login", auto_error=False
-)
+oauth2_scheme_optional = OAuth2PasswordBearer(tokenUrl="/auth/login", auto_error=False)
 
 # Aliases exist so no router signature ever spells out `Depends(...)` inline.
 DbSession = Annotated[Session, Depends(get_db)]

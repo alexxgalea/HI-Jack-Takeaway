@@ -49,9 +49,7 @@ def create_order(db: Session, customer: User, payload: OrderCreate) -> Order:
     ordered_ids = {line.restaurant_item_id for line in payload.items}
     menu = {
         item.id: item
-        for item in db.scalars(
-            select(RestaurantItem).where(RestaurantItem.id.in_(ordered_ids))
-        )
+        for item in db.scalars(select(RestaurantItem).where(RestaurantItem.id.in_(ordered_ids)))
     }
 
     order = Order(
@@ -69,9 +67,7 @@ def create_order(db: Session, customer: User, payload: OrderCreate) -> Order:
         # exists nowhere are the same answer: it is not on this menu. Saying
         # which would turn the endpoint into an item-id probe.
         if item is None or item.restaurant_id != restaurant.id:
-            raise _rejected(
-                f"Item {line.restaurant_item_id} is not on this restaurant's menu"
-            )
+            raise _rejected(f"Item {line.restaurant_item_id} is not on this restaurant's menu")
         if not item.is_available:
             raise _rejected(f"Item {line.restaurant_item_id} is not available")
         if line.quantity <= 0:

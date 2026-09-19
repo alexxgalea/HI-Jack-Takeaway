@@ -91,11 +91,7 @@ def _seed_restaurant(db: Session, spec: RestaurantSpec) -> Restaurant:
         db.flush()  # the items below need the generated id
 
     already_on_the_menu = set(
-        db.scalars(
-            select(RestaurantItem.name).where(
-                RestaurantItem.restaurant_id == restaurant.id
-            )
-        )
+        db.scalars(select(RestaurantItem.name).where(RestaurantItem.restaurant_id == restaurant.id))
     )
     for item in spec.items:
         if item.name in already_on_the_menu:

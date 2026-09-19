@@ -21,6 +21,4 @@ class OrderItem(Base):
     unit_price: Mapped[Decimal] = mapped_column(Numeric(10, 2))
 
     order: Mapped["Order"] = relationship(back_populates="items")
-    restaurant_item: Mapped["RestaurantItem"] = relationship(
-        back_populates="order_items"
-    )
+    restaurant_item: Mapped["RestaurantItem"] = relationship(back_populates="order_items")

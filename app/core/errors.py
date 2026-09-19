@@ -96,9 +96,7 @@ async def app_error_handler(request: Request, exc: Exception) -> JSONResponse:
     )
 
 
-async def unhandled_exception_handler(
-    request: Request, exc: Exception
-) -> JSONResponse:
+async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
     """Answer anything that reaches here with a generic 500.
 
     The traceback is logged, never returned: a stack trace in a response body

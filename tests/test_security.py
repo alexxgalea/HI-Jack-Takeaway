@@ -68,7 +68,9 @@ def test_expired_token_is_rejected() -> None:
 
 
 def test_token_signed_with_another_secret_is_rejected() -> None:
-    token = jwt.encode(_claims(), "a-completely-different-secret-of-sufficient-length", algorithm="HS256")
+    token = jwt.encode(
+        _claims(), "a-completely-different-secret-of-sufficient-length", algorithm="HS256"
+    )
     with pytest.raises(CredentialsError):
         decode_token(token)
 

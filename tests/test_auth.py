@@ -62,9 +62,7 @@ async def test_register_always_assigns_the_user_role(client: AsyncClient) -> Non
     assert response.json()["role"] == UserRole.user.value
 
 
-async def test_register_with_a_duplicate_email_returns_409(
-    client: AsyncClient, user: User
-) -> None:
+async def test_register_with_a_duplicate_email_returns_409(client: AsyncClient, user: User) -> None:
     response = await client.post(
         "/auth/register",
         json={
@@ -113,9 +111,7 @@ async def test_login_token_expires_between_15_and_30_minutes_out(
     )
     payload = decode_token(response.json()["access_token"])
     lifetime_minutes = (payload.exp - payload.iat) / 60
-    assert lifetime_minutes == pytest.approx(
-        get_settings().access_token_expire_minutes, abs=1
-    )
+    assert lifetime_minutes == pytest.approx(get_settings().access_token_expire_minutes, abs=1)
     assert 15 <= lifetime_minutes <= 30
 
 
@@ -305,9 +301,7 @@ async def test_openapi_advertises_the_password_flow_against_auth_login(
     assert flow["password"]["tokenUrl"] == "/auth/login"
 
 
-async def test_docs_authorize_flow_works_end_to_end(
-    client: AsyncClient, admin: User
-) -> None:
+async def test_docs_authorize_flow_works_end_to_end(client: AsyncClient, admin: User) -> None:
     """What the /docs Authorize button does: form login, then a bearer call."""
     login = await client.post(
         "/auth/login",

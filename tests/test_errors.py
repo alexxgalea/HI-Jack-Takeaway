@@ -87,9 +87,7 @@ def test_a_detail_passed_in_overrides_the_default() -> None:
 
 def test_credentials_error_is_the_only_one_carrying_headers() -> None:
     assert CredentialsError.headers == {"WWW-Authenticate": "Bearer"}
-    assert [cls for cls, _, _ in ERRORS if cls.headers is not None] == [
-        CredentialsError
-    ]
+    assert [cls for cls, _, _ in ERRORS if cls.headers is not None] == [CredentialsError]
 
 
 # --- the handlers ---------------------------------------------------------
