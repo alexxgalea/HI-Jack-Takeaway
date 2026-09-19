@@ -15,5 +15,35 @@ services:
       timeout: 5s
       retries: 10
 
+  api:
+    build: .
+    depends_on:
+      postgres:
+        # Not just "started": the entrypoint runs `alembic upgrade head` as its
+        # first act, which needs a server already accepting connections.
+        condition: service_healthy
+    environment:
+      # The compose service name, not localhost - inside the network the
+      # database is another container, not this one.
+      DATABASE_URL: postgresql+psycopg://postgres:postgres@postgres:5432/hijack_takeaway
+      # So a fresh clone with no .env still boots. Named for what it is: a
+      # value to override in anything that is not a local dev stack.
+      JWT_SECRET: ${JWT_SECRET:-dev-only-not-for-deployment}
+    # No `ports:` on purpose - nginx is the only ingress, and it is also what
+    # makes gunicorn's --forwarded-allow-ips='*' safe.
+    healthcheck:
+      # python:3.12-slim ships no curl, and the point of the slim image is not
+      # to install one for a healthcheck.
+      test:
+        - CMD
+        - python
+        - -c
+        - import urllib.request; urllib.request.urlopen("http://localhost:8000/health")
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      # Covers the first-boot migration, which runs before the port opens.
+      start_period: 30s
+
 volumes:
   hijack_takeaway_pgdata:

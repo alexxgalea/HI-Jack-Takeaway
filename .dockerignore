@@ -1,0 +1,11 @@
+# Keeps the build context to what the image actually needs. `tests` and
+# `documentation` are deliberate: neither ships in the runtime image, and
+# excluding them means editing either one does not invalidate the build cache.
+.git
+.venv
+__pycache__
+.pytest_cache
+htmlcov
+.env
+documentation
+tests
