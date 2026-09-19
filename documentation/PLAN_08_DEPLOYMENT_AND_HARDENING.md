@@ -9,8 +9,9 @@ prior milestone (own acceptance checklist in the PR description, CI green before
 
 **This milestone does not change core business logic.** Order status transitions, price
 snapshotting, `total_amount`, the JWT auth flow, role checks, routes, response models, response
-shapes and the database schema are untouched. The only edits to `app/` are three
-`# type: ignore` comments in §5. No unrelated refactoring; do not silently expand scope.
+shapes and the database schema are untouched. The only edits to `app/` are four
+`# type: ignore` comments and one `ruff format` pass, both in §5 and neither of them a behaviour
+change. No unrelated refactoring; do not silently expand scope.
 
 The pins and the exact lint/type findings below were established by a dry run on 2026-09-19,
 not estimated. Where this document states a count or a version, it was measured.
@@ -138,8 +139,12 @@ Today `docker compose up` starts Postgres only, so running this project takes fi
 ## 5. Lint and type gates in CI
 
 CI runs migrations, tests and coverage; there is no ruff or mypy config in the repo and no gate
-on either. The dry run found the code close to clean - 9 ruff findings and 5 mypy errors, none
-of them defects.
+on either. The code is close to clean, and the numbers below were measured rather than estimated.
+`select = ["E", "F", "I", "UP", "B", "SIM"]` at `line-length = 100` with no `ignore` reports
+**15 findings**, of which **6 are `E501`** - five in `alembic/versions/0001_initial.py`, one at
+[tests/test_security.py:71](../tests/test_security.py#L71), a 106-column `jwt.encode` string the
+formatter cannot split. Ignoring `E501` leaves **9**. `mypy app` under `strict` reports **5
+errors** in 2 files. None of the 14 is a defect.
 
 **Add - ruff**
 - [ ] `[tool.ruff]` `line-length = 100`, `target-version = "py312"`.
@@ -148,38 +153,65 @@ of them defects.
       into `settings = (\n    get_settings()\n)  # fail fast ...`; at 100 every change is a pure
       line-join and the author's own lines are left alone.
 - [ ] `[tool.ruff.lint] select = ["E", "F", "I", "UP", "B", "SIM"]` with a reasoned `ignore`:
-      - `E501` - ruff's own guidance for formatter users; `ruff format` owns line length and
-        cannot split long comments or generated strings.
+      - `E501` (6 hits: five in `alembic/versions/0001_initial.py`, one in
+        `tests/test_security.py`) - ruff's own guidance for formatter users; `ruff format` owns
+        line length and cannot split long comments or generated strings.
       - `UP042` (2 hits, `app/models/enums.py`) - `(str, Enum)` -> `StrEnum` changes what
         `str(UserRole.user)` returns, from `"UserRole.user"` to `"user"`. That is a behaviour
         change, not a refactor, and it does not belong in a deployment branch.
       - `UP046`/`UP047` (2 hits) - PEP 695 type parameters for
-        `PaginatedResponse(BaseModel, Generic[T])` and the `_page` helper. Mechanical, but it
-        rewrites a shipped response schema that FastAPI resolves through `response_model`.
+        `PaginatedResponse(BaseModel, Generic[T])` ([pagination.py:8](../app/schemas/pagination.py#L8))
+        and the `_page` helper ([admin.py:101](../app/api/routers/admin.py#L101)). Mechanical, but
+        it rewrites a shipped response schema that FastAPI resolves through `response_model`.
 - [ ] `[tool.ruff.lint.isort] known-third-party = ["alembic"]`. Without it ruff sees the repo's
       top-level `alembic/` directory - a script location with no `__init__.py`, not a package -
       and sorts `from alembic import op` into the first-party block, fighting the import order
       every generated revision is born with.
-- [ ] Fix `alembic/script.py.mako`, do not exclude the directory. 4 of the 9 findings are in
+      **Note what this setting does to `alembic/env.py`:** that file has **zero findings today**,
+      because ruff currently treats `alembic` as first-party and its order
+      (`alembic`, `app.core`, `app.db`) is already sorted on that reading. Adding
+      `known-third-party` is what *creates* its `I001`, by moving `from alembic import context`
+      up into the third-party block beside `sqlalchemy`. The setting is still right - it is the
+      generated revisions it exists for - but it takes the count of findings to fix from 5 to
+      **6**, and `env.py`'s sort is a consequence of the config rather than a pre-existing
+      problem.
+- [ ] Fix `alembic/script.py.mako`, do not exclude the directory. **5 of the 9** findings are in
       `alembic/versions/0001_initial.py` and come straight from the template's
-      `from typing import Sequence, Union` (UP035, UP007 x3) and unsorted imports. Fixing the
-      template makes every future revision born clean; then apply the same header fix once to
-      `0001_initial.py`. The 5th finding is a genuine import sort in `alembic/env.py`.
+      `from typing import Sequence, Union` - `UP035`, `I001` and `UP007` x3. Fixing the template
+      makes every future revision born clean; then apply the same header fix once to
+      `0001_initial.py`. The remaining 4 of the 9 are the ignored ones: `UP042` x2 in
+      `app/models/enums.py`, `UP046` in `app/schemas/pagination.py`, `UP047` in
+      `app/api/routers/admin.py`. Together with `env.py`'s config-induced `I001` above, that is
+      **6 findings to fix and 4 to ignore**.
 - [ ] One `style: apply ruff format` commit, kept separate from the functional commits:
-      **23 files**, all in `app/` and `tests/`, all line-joins. Verify the diff changed
-      formatting only.
+      **23 files** - 1 in `alembic/`, 13 in `app/`, 9 in `tests/`. The `app/` and `tests/` changes
+      are all line-joins. `alembic/versions/0001_initial.py` is **not**: it also gets quote
+      normalization (`'...'` -> `"..."`) and every `op.create_table(...)` call exploded onto one
+      argument per line. That is expected - it is what linting the directory rather than
+      excluding it costs - and it means `0001_initial.py` is touched by both this commit and the
+      template fix above. Verify the diff changed formatting only.
+      [main.py](../app/main.py) is correctly **absent** from the 23 - its line 11 is 93 columns,
+      which is what `line-length = 100` was chosen to leave alone.
 
 **Add - mypy**
 - [ ] `[tool.mypy]` `python_version = "3.12"`, `strict = true`, `warn_unused_ignores = true`.
       Full strict is reachable; `mypy app` reports exactly 5 errors, in 2 files, both idiom
       frictions rather than defects:
       - `app/core/config.py` (2) - `Settings()` missing `database_url`/`jwt_secret`.
-        pydantic-settings reads them from the environment and mypy cannot see it. One
-        `# type: ignore[call-arg]`.
+        pydantic-settings reads them from the environment and mypy cannot see it. Both errors sit
+        on line 34, so **one** `# type: ignore[call-arg]` clears the pair. The file is not among
+        the 23 reformatted, so line 34 holds.
       - `app/api/routers/admin.py` (3) - `PaginatedResponse[OrderOut](items=<ORM rows>)`.
         Pydantic validates the ORM rows into `OrderOut` on construction, exactly as
-        `response_model` does elsewhere. Three `# type: ignore[arg-type]`, placed on the
-        exploded `items=` argument so `ruff format` leaves them where they belong.
+        `response_model` does elsewhere. Three `# type: ignore[arg-type]`.
+- [ ] **Place the ignores after `ruff format`, not before.** At `line-length = 100` the formatter
+      joins each of those three calls onto one line (93/93/91 columns), landing them at
+      `admin.py` **159, 183 and 201**; the ignore is then an ordinary trailing comment on the
+      formatted line. A comment placed inside the call beforehand would pin that call open
+      permanently and make three of the 23 files something other than line-joins. The trailing
+      form is stable in both directions: `ruff format --check` does not re-split a line that
+      overflows only through a trailing comment, and `E501` exempts a line whose sole overflow is
+      a trailing pragma, so the 117-119 column results are not findings even with `E501` selected.
       `warn_unused_ignores` is what stops those four comments outliving their reason.
 - [ ] CI target is `mypy app`, which never reaches `alembic/`. An
       `[[tool.mypy.overrides]] module = "alembic.versions.*"` is only worth adding if local
@@ -192,6 +224,23 @@ of them defects.
 - [ ] `.github/workflows/ci.yml` - new `lint` job, same checkout/setup steps as `test`, running
       `ruff check .`, `ruff format --check .`, `mypy app`. It needs no database.
 - [ ] Add `lint` to the required status checks on protected `main`.
+
+**Commit sequence**
+
+Five commits, in this order, so each gate turns green on the commit that earns it and a failure
+is attributable to one step. The style commit stays alone, and the type ignores come *after* it.
+
+| # | Commit | Files | Green after |
+| --- | --- | --- | --- |
+| 1 | `chore: ruff and mypy configuration` | `pyproject.toml` only | nothing yet - the gates are defined, not satisfied |
+| 2 | `fix: alembic import hygiene` | `alembic/script.py.mako`, `alembic/versions/0001_initial.py`, `alembic/env.py` | `ruff check .` exits 0 |
+| 3 | `style: apply ruff format` | the 23 files, alone in this commit | `ruff format --check .` exits 0 |
+| 4 | `chore: silence four mypy strict findings` | `app/core/config.py` (line 34), `app/api/routers/admin.py` (lines 159, 183, 201) | `mypy app` exits 0 |
+| 5 | `ci: add lint job` | `.github/workflows/ci.yml` | the full gate runs in CI |
+
+- [ ] Commit 2 does not touch `admin.py` and commit 3 does not touch `config.py`, so the four
+      line numbers in commit 4 are stable as written. Confirm them against the tree rather than
+      trusting them if either earlier commit ends up wider than described.
 
 **Acceptance**
 - [ ] `ruff check .`, `ruff format --check .` and `mypy app` all exit 0 locally and in CI.
