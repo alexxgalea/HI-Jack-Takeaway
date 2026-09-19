@@ -14,6 +14,7 @@ All milestones are merged or ready to merge — 280 tests passing.
 - [x] M5: Status transitions
 - [x] M6: Admin endpoints
 - [x] M7: Hardening + CI
+- [x] M8: Deployment — Docker, nginx, lint/type gates
 
 **Delivered ahead of its milestone:** [`app/db/seed.py`](app/db/seed.py) (an M7 item) landed with M3, and [`app/core/errors.py`](app/core/errors.py) landed with M2 as a two-class stub because `decode_token` needed `CredentialsError`. M7 completed that hierarchy and registered the handlers.
 
@@ -28,6 +29,8 @@ All milestones are merged or ready to merge — 280 tests passing.
 - **Validation:** Pydantic v2 + pydantic-settings
 - **Auth:** JWT (PyJWT, HS256) + pwdlib/Argon2
 - **Python:** 3.12+
+- **Serving:** Gunicorn + `uvicorn_worker.UvicornWorker`, behind nginx
+- **Containers:** Docker multi-stage build, docker-compose
 
 Every dependency is `==`-pinned in [pyproject.toml](pyproject.toml), with a resolved [requirements.lock](requirements.lock) alongside.
 
@@ -52,7 +55,73 @@ alembic/versions/          # 0001_initial.py — all 5 tables + enum types
 tests/                     # 280 tests
 ```
 
+## Run with Docker
+
+The whole stack — Postgres, the API under Gunicorn, and nginx in front of it — from one command
+and a clean clone. No virtualenv, no `.env`, no separate migration step.
+
+```bash
+docker compose up --build
+```
+
+Then:
+
+```bash
+curl -i localhost:8080/health     # {"status": "ok"}
+```
+
+Interactive docs at http://localhost:8080/docs.
+
+| | |
+| --- | --- |
+| Public endpoint | **http://localhost:8080** — nginx, the only published application port |
+| API container | `api:8000` on the compose network — **not** published to the host |
+| Database | `localhost:5432`, as before |
+
+`localhost:8000` is deliberately refused from the host. nginx being the sole ingress is what makes
+Gunicorn's `--forwarded-allow-ips='*'` safe: the API trusts `X-Forwarded-For` because nginx is the
+only client that can reach it and sets that header itself. Publish the API directly and that flag
+has to go at the same time.
+
+**Migrations run themselves.** [docker/entrypoint.sh](docker/entrypoint.sh) runs
+`alembic upgrade head` before starting Gunicorn, so a first boot against an empty volume builds
+the schema and a later boot is a no-op. `docker compose up` blocks until the API passes its
+healthcheck, so the first request after it returns will succeed rather than hitting a proxy whose
+upstream is still migrating.
+
+### Configuration
+
+`JWT_SECRET` defaults to `dev-only-not-for-deployment` so a fresh clone boots with no `.env` at
+all. **That default is for local development and nothing else.** Override it anywhere real:
+
+```bash
+JWT_SECRET=$(python -c "import secrets; print(secrets.token_urlsafe(64))") docker compose up --build
+```
+
+Tokens are signed with this value, so anyone holding it can mint an admin token. `DATABASE_URL` is
+set by compose to reach the `postgres` service by name and needs no override.
+
+### Useful commands
+
+```bash
+docker compose up --build -d          # background
+docker compose logs -f api            # migration output, then Gunicorn's access log
+docker compose ps                     # health status per service
+docker compose exec api alembic current
+docker compose down                   # stop; keeps the database volume
+docker compose down -v                # stop and delete the volume, so the next boot migrates from scratch
+```
+
+To run only the database — the setup the local workflow below expects — start that one service:
+
+```bash
+docker compose up -d postgres
+```
+
 ## Getting Started
+
+The local path, for development against `--reload`. [Run with Docker](#run-with-docker) is the
+faster way to simply get the API running.
 
 ### 1. Install
 
@@ -82,10 +151,12 @@ python -c "import secrets; print(secrets.token_urlsafe(64))"   # paste into JWT_
 ### 3. Start Postgres
 
 ```bash
-docker compose up -d
+docker compose up -d postgres
 ```
 
 This creates the `hijack_takeaway` database on port 5432 — the one the default `DATABASE_URL` and the test suite both use.
+
+Name the service explicitly: since M8, a bare `docker compose up -d` starts the API and nginx as well, which is [the Docker path](#run-with-docker) rather than this one.
 
 ### 4. Run migrations
 
@@ -263,6 +334,7 @@ Logs are JSON lines, one object per record, with a line per request carrying `me
 
 - [DECISIONS.md](documentation/DECISIONS.md) — data model, relations, auth design, out-of-scope features
 - [PLAN.md](documentation/PLAN.md) — milestones, acceptance criteria, execution order, branching
+- [PLAN_08_DEPLOYMENT_AND_HARDENING.md](documentation/PLAN_08_DEPLOYMENT_AND_HARDENING.md) — the M8 amendment: Docker, nginx, lint/type gates
 
 ---
 

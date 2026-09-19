@@ -26,6 +26,9 @@
   - Roles: two — `user`, `admin`.
   - Dependencies: `get_current_user` (decode → validate `exp`/`sub` → load user → 401 on any failure), `require_admin` (`user.role == "admin"` else 403).
 - **Out of scope:** payments, refunds, coupons, driver assignment, GPS/live tracking, complex inventory.
+  That list covers product features. Engineering work that was found, weighed and deliberately not
+  done is recorded separately under
+  [Known improvements, deferred](#known-improvements-deferred-to-keep-the-deployment-milestone-focused).
 
 ## M8 - Deployment and tooling
 
@@ -61,6 +64,39 @@
 - **Ruff and mypy are not in `requirements.lock`.** They are neither runtime nor test
   dependencies, and adding them would mean changing the lockfile's own documented regeneration
   command. They live in a `dev` extra, `==`-pinned there, which satisfies M0's pinning rule.
+- **The API image is two-stage, and the runtime stage has no source tree.** The builder installs
+  `requirements.lock` and then `pip install . --no-deps` - non-editable, so the `app` package
+  lands in site-packages. The runtime stage copies only `/opt/venv`, plus `alembic.ini` and
+  `alembic/`, and needs neither pip nor the repository to run. `--no-deps` on the project install
+  matters: the lockfile has already placed every dependency at its pinned version, and letting
+  pip re-resolve at that point would be the one place the lock could be bypassed unnoticed.
+- **Migrations run in the entrypoint, not by hand.** `docker/entrypoint.sh` runs
+  `alembic upgrade head` and then `exec gunicorn`, under `set -e`. This is what makes
+  `docker compose up --build` the whole of the setup instructions: nothing manual sits between
+  `up` and a working API. `set -e` means a failed migration stops the container rather than
+  starting a server against a half-built schema, and `exec` means gunicorn is PID 1 and receives
+  signals directly instead of through a shell that would swallow them.
+- **`uvicorn_worker.UvicornWorker`, not `uvicorn.workers.UvicornWorker`.** On the pinned uvicorn
+  0.53.0 the in-tree module still imports, but raises a `DeprecationWarning` naming the
+  `uvicorn-worker` package as its replacement. The maintained package is pinned as a dependency
+  rather than relying on a module that announces its own removal.
+- **The container runs as a non-root `app` user (uid 1000).** Gunicorn 26 also opens a control
+  socket under `$HOME`, so the user is created with a home directory; a `nologin`-style user with
+  no writable home would fail to boot here, which is worth knowing before anyone hardens it
+  further.
+- **nginx is the only ingress, and that is what makes `--forwarded-allow-ips='*'` safe.** The
+  `api` service publishes no host port - only nginx does, on 8080. Gunicorn therefore trusts
+  `X-Forwarded-For` and `X-Forwarded-Proto` from nginx, which is sound precisely because nginx is
+  the only client that can reach it and sets those headers itself rather than passing along
+  whatever a caller sent. The flag and the missing `ports:` entry are one decision, not two: if
+  the API is ever published directly, the wildcard has to go at the same time, because anyone
+  could then forge a client IP.
+- **Base images are floating minor tags: `python:3.12-slim` and `nginx:1-alpine`.** Digest pinning
+  was considered and deliberately not introduced. It would not match the style of the rest of the
+  repository, and for a tech challenge a reviewer who can read the compose file at a glance is
+  worth more than byte-exact image identity. The trade is real and stated rather than hidden: two
+  builds a month apart can differ in their base layer. A deployment that needs reproducible images
+  pins digests here.
 - **`.dockerignore` excludes `**/__pycache__`, not `__pycache__`.** The plan specified the bare
   name, which turns out to exclude only a root-level directory: Docker's ignore patterns are
   path-matched rather than recursive. The host's `alembic/__pycache__` and
@@ -78,3 +114,29 @@
   already waits on `postgres`. The cost is that `docker compose up` now blocks until the API is
   healthy instead of returning immediately; for a stack whose selling point is that `up` alone
   produces a working API, a slower `up` beats a fast one that briefly serves errors.
+
+### Known improvements, deferred to keep the deployment milestone focused
+
+Real findings, none of them named in the brief. They are recorded here rather than implemented,
+because the original mistake in this repository was silence about a gap, not the gap itself.
+
+- **Registration input validation.** `{"password": ""}` returns 201 and creates an account that
+  can never authenticate, with no password reset in scope. `Case@X.com` and `case@x.com` both
+  register, because the unique index is byte-exact. `full_name` accepts `" "`. And
+  `POST /auth/register`'s check-then-insert race surfaces as a 500 rather than the documented
+  409. The fix is `Field(min_length=8)`, a lowercasing validator applied at register and at login
+  lookup, and `try/except IntegrityError` around the commit.
+- **Indexes and foreign-key hygiene.** Postgres does not auto-index foreign keys, and
+  `ix_users_email` is the only non-PK index in the schema, so every listing is a sequential scan.
+  One Alembic revision would add composites on `orders (customer_id, created_at DESC, id DESC)`
+  and `orders (restaurant_id, created_at DESC, id DESC)` - whose leading column also serves the
+  FK lookup - plus single-column indexes on `order_items (order_id)`,
+  `order_items (restaurant_item_id)` and `restaurant_items (restaurant_id)`. The same revision is
+  where FK `ondelete` rules and `CHECK` constraints mirroring the existing Pydantic rules belong.
+- **Two pagination contracts.** `GET /orders` returns a bare list while the `/admin` listings
+  return `PaginatedResponse`. Unifying them is a breaking response-shape change, so it needs a
+  version bump rather than a quiet edit. `GET /restaurants` is unpaginated for the same reason.
+- **`seed.py` has 0% coverage.**
+- **TLS termination at nginx** needs a certificate and a real hostname, so it is out of scope for
+  a stack that runs on `localhost`. The proxy already sets `X-Forwarded-Proto`, which means
+  adding TLS later is configuration rather than code.
