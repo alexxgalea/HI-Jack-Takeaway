@@ -255,10 +255,10 @@ is attributable to one step. The style commit stays alone, and the type ignores 
 1. §5 first - the gates land on the code as it is today, so §1 and §2 are written under them.
 2. §1 - dependencies and lockfile, Dockerfile, entrypoint, `api` service.
 3. §2 - nginx has nothing to proxy to until the API image exists.
-4. Docs: README gains a *Run with Docker* section as the primary path; DECISIONS.md records the
-   Docker/nginx/lint decisions, the floating-tag choice, the `--forwarded-allow-ips` reasoning
-   and the deferred list, and corrects its *Out of scope* section; PLAN.md's branching table
-   gains the `feat/08-deployment-critical` row.
+4. Docs: README gains a *Run with Docker* section as the primary path and a *Known limitations*
+   section carrying the deferred list; DECISIONS.md records the runtime shape - nginx as sole
+   ingress, the `--forwarded-allow-ips` reasoning, the floating-tag choice - and corrects its
+   *Out of scope* section; PLAN.md's branching table gains the `feat/08-deployment-critical` row.
 
 ## Validate progressively
 

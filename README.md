@@ -330,9 +330,20 @@ Logs are JSON lines, one object per record, with a line per request carrying `me
 - **Logs** — no bodies, no headers, and a redaction filter over everything that is written. See above.
 - **Failure codes** — authentication failures answer 401 with a generic detail and `WWW-Authenticate: Bearer`; authorization failures answer 403. An unknown email and a wrong password are indistinguishable, so login cannot be used to enumerate accounts.
 
+## Known limitations
+
+Real findings, none of them named in the brief. They are recorded here rather than implemented, because the scope boundary is the brief and the fix for a gap outside it is to say so, not to quietly widen the submission.
+
+- **Registration input validation.** `{"password": ""}` returns 201 and creates an account that can never authenticate, with no password reset in scope. `Case@X.com` and `case@x.com` both register, because the unique index is byte-exact. `full_name` accepts `" "`. And `POST /auth/register`'s check-then-insert race surfaces as a 500 rather than the documented 409. The fix is `Field(min_length=8)`, a lowercasing validator applied at register and at login lookup, and `try/except IntegrityError` around the commit.
+- **Indexes and foreign-key hygiene.** Postgres does not auto-index foreign keys, and `ix_users_email` is the only non-PK index in the schema, so every listing is a sequential scan. One Alembic revision would add composites on `orders (customer_id, created_at DESC, id DESC)` and `orders (restaurant_id, created_at DESC, id DESC)` — whose leading column also serves the FK lookup — plus single-column indexes on `order_items (order_id)`, `order_items (restaurant_item_id)` and `restaurant_items (restaurant_id)`. The same revision is where FK `ondelete` rules and `CHECK` constraints mirroring the existing Pydantic rules belong.
+- **Two pagination contracts.** `GET /orders` returns a bare list while the `/admin` listings return `PaginatedResponse`. Unifying them is a breaking response-shape change, so it needs a version bump rather than a quiet edit. `GET /restaurants` is unpaginated for the same reason.
+- **`seed.py` has 0% coverage.**
+- **A 500 response carries no CORS headers.** Starlette's `ServerErrorMiddleware` sits outside the user middleware stack, so the catch-all handler's response never passes back through `CORSMiddleware`. Handled `AppError` responses are unaffected. The fix is a middleware-ordering workaround for a case that only shows up when the server is already broken.
+- **TLS terminates nowhere.** It needs a certificate and a real hostname, so it is out of scope for a stack that runs on `localhost`. nginx already sets `X-Forwarded-Proto`, which makes adding TLS later configuration rather than code.
+
 ## Documentation
 
-- [DECISIONS.md](documentation/DECISIONS.md) — data model, relations, auth design, out-of-scope features
+- [DECISIONS.md](documentation/DECISIONS.md) — the fixed skeleton: data model, enums, invariants, auth, API conventions, out-of-scope features
 - [PLAN.md](documentation/PLAN.md) — milestones, acceptance criteria, execution order, branching
 - [PLAN_08_DEPLOYMENT_AND_HARDENING.md](documentation/PLAN_08_DEPLOYMENT_AND_HARDENING.md) — the M8 amendment: Docker, nginx, lint/type gates
 

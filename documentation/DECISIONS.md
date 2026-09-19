@@ -1,142 +1,116 @@
-## Key design decisions
+# Decisions
 
-- **Model:** `users`, `restaurants`, `restaurant_items`, `orders`, `order_items`.
-- **Relations**
-  - `restaurants` 1–N `restaurant_items`
-  - `users` 1–N `orders`
-  - `restaurants` 1–N `orders`
-  - `orders` 1–N `order_items`
-  - `restaurant_items` 1–N `order_items`
-  - Key FKs:
-    - `restaurant_items.restaurant_id` → `restaurants.id`
-    - `orders.customer_id` → `users.id`
-    - `orders.restaurant_id` → `restaurants.id`
-    - `order_items.order_id` → `orders.id`
-    - `order_items.restaurant_item_id` → `restaurant_items.id`
-  - Other constraints: `users.email` unique, indexed.
-- **Order status:** enum with fixed values `pending → accepted → out_for_delivery → delivered`; invalid transitions are rejected.
-- **Prices:** `order_items.unit_price` is a snapshot at order time, not recomputed from the menu.
-- **Availability:** modelled as `restaurant_items.is_available` (bool); no ingredient-level inventory or stock tables.
-- **Auth:** Custom JWT with `pyjwt`, **not** `fastapi-users`.
-  - *Rationale:* default FastAPI approach, minimal dependencies, full control over token payload, expiration and role checks.
-  - Token extraction: `OAuth2PasswordBearer(tokenUrl="/auth/login")`; `POST /auth/login` therefore consumes `OAuth2PasswordRequestForm` (form `username` = email).
-  - Tokens: `pyjwt`, HS256, decoded with an explicit `algorithms=["HS256"]` allowlist; claims `sub` (user id), `role`, `exp`, `iat`.
-  - Access tokens short-lived (15–30 min). No refresh tokens, no revocation list, no password reset.
-  - Passwords: one-way hashing via `pwdlib` (Argon2).
-  - Roles: two — `user`, `admin`.
-  - Dependencies: `get_current_user` (decode → validate `exp`/`sub` → load user → 401 on any failure), `require_admin` (`user.role == "admin"` else 403).
-- **Out of scope:** payments, refunds, coupons, driver assignment, GPS/live tracking, complex inventory.
-  That list covers product features. Engineering work that was found, weighed and deliberately not
-  done is recorded separately under
-  [Known improvements, deferred](#known-improvements-deferred-to-keep-the-deployment-milestone-focused).
+The fixed skeleton of this project: the data model, how a request is authenticated, the
+conventions every endpoint follows, and what is deliberately not built.
 
-## M8 - Deployment and tooling
+This file is the starting point to build *on*. It states what is settled, not why each
+milestone went the way it did — that is [PLAN.md](PLAN.md) for the spec and the README for the
+delivered behaviour.
 
-- **Lint and type gates:** `ruff` and `mypy` run in CI as their own job. Neither is named in the
-  brief; both are kept because the repo already runs CI the brief never asked for, and a
-  config-only gate over existing code carries no product risk.
-- **Ruff line length is 100, not Black's 88.** The codebase is hand-formatted in a Black-ish style
-  at roughly 90 columns and matches neither width exactly. At 88 the formatter mangles
-  `app/main.py`'s settings line into a three-line parenthesised expression; at 100 every change is
-  a pure line-join and the author's own lines are left alone.
-- **Four ruff rules are ignored, each for a reason, none of them "it was noisy":**
-  - `E501` - `ruff format` owns line length and cannot split a long comment or string literal.
-  - `UP042` - `(str, Enum)` -> `StrEnum` changes what `str(UserRole.user)` returns, from
-    `"UserRole.user"` to `"user"`. That is a behaviour change, not a refactor.
-  - `UP046`/`UP047` - PEP 695 type parameters would rewrite `PaginatedResponse`, a shipped
-    response schema FastAPI resolves through `response_model`. Mechanical, but out of scope here.
-- **`known-third-party = ["alembic"]`:** the repo has a top-level `alembic/` script directory with
-  no `__init__.py`, which ruff would otherwise read as a first-party package and sort against the
-  order every generated revision is born with.
-- **The Alembic template was fixed, not excluded.** Five of the nine findings came from
-  `alembic/script.py.mako` leaking `typing.Sequence`/`Union` into `0001_initial.py`. Fixing the
-  template means every future revision is born clean; the same fix was then applied once to the
-  existing revision. `alembic/versions/` is linted and formatted like any other source - an
-  excluded directory is a directory whose next migration nobody checks.
-- **Type ignores are placed after formatting, not before.** `mypy --strict` leaves four findings,
-  all idiom friction rather than defects: `Settings()` reads `database_url` and `jwt_secret` from
-  the environment where mypy cannot see them, and the three admin listings hand ORM rows to
-  `PaginatedResponse[...]`, which Pydantic validates on construction exactly as `response_model`
-  does elsewhere. Each is a trailing `# type: ignore` on the formatted line. A comment placed
-  inside a call would pin that call open forever; a trailing one leaves the formatter's own
-  output untouched, and ruff exempts the pragma from `E501` by design. `warn_unused_ignores`
-  is what stops the four comments outliving their reason.
-- **Ruff and mypy are not in `requirements.lock`.** They are neither runtime nor test
-  dependencies, and adding them would mean changing the lockfile's own documented regeneration
-  command. They live in a `dev` extra, `==`-pinned there, which satisfies M0's pinning rule.
-- **The API image is two-stage, and the runtime stage has no source tree.** The builder installs
-  `requirements.lock` and then `pip install . --no-deps` - non-editable, so the `app` package
-  lands in site-packages. The runtime stage copies only `/opt/venv`, plus `alembic.ini` and
-  `alembic/`, and needs neither pip nor the repository to run. `--no-deps` on the project install
-  matters: the lockfile has already placed every dependency at its pinned version, and letting
-  pip re-resolve at that point would be the one place the lock could be bypassed unnoticed.
-- **Migrations run in the entrypoint, not by hand.** `docker/entrypoint.sh` runs
-  `alembic upgrade head` and then `exec gunicorn`, under `set -e`. This is what makes
-  `docker compose up --build` the whole of the setup instructions: nothing manual sits between
-  `up` and a working API. `set -e` means a failed migration stops the container rather than
-  starting a server against a half-built schema, and `exec` means gunicorn is PID 1 and receives
-  signals directly instead of through a shell that would swallow them.
-- **`uvicorn_worker.UvicornWorker`, not `uvicorn.workers.UvicornWorker`.** On the pinned uvicorn
-  0.53.0 the in-tree module still imports, but raises a `DeprecationWarning` naming the
-  `uvicorn-worker` package as its replacement. The maintained package is pinned as a dependency
-  rather than relying on a module that announces its own removal.
-- **The container runs as a non-root `app` user (uid 1000).** Gunicorn 26 also opens a control
-  socket under `$HOME`, so the user is created with a home directory; a `nologin`-style user with
-  no writable home would fail to boot here, which is worth knowing before anyone hardens it
-  further.
-- **nginx is the only ingress, and that is what makes `--forwarded-allow-ips='*'` safe.** The
-  `api` service publishes no host port - only nginx does, on 8080. Gunicorn therefore trusts
-  `X-Forwarded-For` and `X-Forwarded-Proto` from nginx, which is sound precisely because nginx is
-  the only client that can reach it and sets those headers itself rather than passing along
-  whatever a caller sent. The flag and the missing `ports:` entry are one decision, not two: if
-  the API is ever published directly, the wildcard has to go at the same time, because anyone
-  could then forge a client IP.
-- **Base images are floating minor tags: `python:3.12-slim` and `nginx:1-alpine`.** Digest pinning
-  was considered and deliberately not introduced. It would not match the style of the rest of the
-  repository, and for a tech challenge a reviewer who can read the compose file at a glance is
-  worth more than byte-exact image identity. The trade is real and stated rather than hidden: two
-  builds a month apart can differ in their base layer. A deployment that needs reproducible images
-  pins digests here.
-- **`.dockerignore` excludes `**/__pycache__`, not `__pycache__`.** The plan specified the bare
-  name, which turns out to exclude only a root-level directory: Docker's ignore patterns are
-  path-matched rather than recursive. The host's `alembic/__pycache__` and
-  `alembic/versions/__pycache__` were shipping inside the runtime image, which made the image
-  contents depend on whatever bytecode the build machine happened to have lying around. Nothing
-  stale executes - source and `.pyc` are copied from the same host state, so Python's mtime/size
-  check passes - but a build whose output varies with host state is not reproducible, which is
-  the whole point of the line. `**/` matches at any depth and restores the intent. The pattern is
-  worth knowing about because the bare form looks correct and fails silently.
-- **nginx waits for the API to be healthy, not merely started.** The plan specified
-  `depends_on: api`, whose short form means `service_started`. The API entrypoint runs
-  `alembic upgrade head` before gunicorn binds its port, so "started" left a window - measured,
-  not assumed - in which nginx was already accepting traffic and answering 502 to every request.
-  The long form with `condition: service_healthy` closes it, and matches how the `api` service
-  already waits on `postgres`. The cost is that `docker compose up` now blocks until the API is
-  healthy instead of returning immediately; for a stack whose selling point is that `up` alone
-  produces a working API, a slower `up` beats a fast one that briefly serves errors.
+## Stack
 
-### Known improvements, deferred to keep the deployment milestone focused
+FastAPI · PostgreSQL 17 · SQLAlchemy 2.0 · Alembic · Pydantic v2 · custom JWT (PyJWT + pwdlib) ·
+Gunicorn with `uvicorn_worker.UvicornWorker` behind nginx · Docker Compose.
 
-Real findings, none of them named in the brief. They are recorded here rather than implemented,
-because the original mistake in this repository was silence about a gap, not the gap itself.
+Every dependency is `==`-pinned in [pyproject.toml](../pyproject.toml) and resolved in
+[requirements.lock](../requirements.lock).
 
-- **Registration input validation.** `{"password": ""}` returns 201 and creates an account that
-  can never authenticate, with no password reset in scope. `Case@X.com` and `case@x.com` both
-  register, because the unique index is byte-exact. `full_name` accepts `" "`. And
-  `POST /auth/register`'s check-then-insert race surfaces as a 500 rather than the documented
-  409. The fix is `Field(min_length=8)`, a lowercasing validator applied at register and at login
-  lookup, and `try/except IntegrityError` around the commit.
-- **Indexes and foreign-key hygiene.** Postgres does not auto-index foreign keys, and
-  `ix_users_email` is the only non-PK index in the schema, so every listing is a sequential scan.
-  One Alembic revision would add composites on `orders (customer_id, created_at DESC, id DESC)`
-  and `orders (restaurant_id, created_at DESC, id DESC)` - whose leading column also serves the
-  FK lookup - plus single-column indexes on `order_items (order_id)`,
-  `order_items (restaurant_item_id)` and `restaurant_items (restaurant_id)`. The same revision is
-  where FK `ondelete` rules and `CHECK` constraints mirroring the existing Pydantic rules belong.
-- **Two pagination contracts.** `GET /orders` returns a bare list while the `/admin` listings
-  return `PaginatedResponse`. Unifying them is a breaking response-shape change, so it needs a
-  version bump rather than a quiet edit. `GET /restaurants` is unpaginated for the same reason.
-- **`seed.py` has 0% coverage.**
-- **TLS termination at nginx** needs a certificate and a real hostname, so it is out of scope for
-  a stack that runs on `localhost`. The proxy already sets `X-Forwarded-Proto`, which means
-  adding TLS later is configuration rather than code.
+## Data model
+
+Five tables. SQLAlchemy 2.0 declarative style throughout — `Mapped[...]` + `mapped_column(...)`,
+never the old `Column()` form.
+
+| Table | Columns |
+| --- | --- |
+| `users` | `id`, `email` (unique, indexed), `hashed_password`, `full_name`, `role`, `is_active`, `created_at` |
+| `restaurants` | `id`, `name`, `address`, `phone` (nullable), `is_active` |
+| `restaurant_items` | `id`, `restaurant_id` → `restaurants.id`, `name`, `description` (nullable), `price` `Numeric(10,2)`, `is_available` |
+| `orders` | `id`, `customer_id` → `users.id`, `restaurant_id` → `restaurants.id`, `status`, `delivery_address`, `total_amount` `Numeric(10,2)`, `created_at`, `updated_at` |
+| `order_items` | `id`, `order_id` → `orders.id`, `restaurant_item_id` → `restaurant_items.id`, `quantity`, `unit_price` `Numeric(10,2)` |
+
+Relations, all one-to-many:
+
+```
+restaurants  1─N  restaurant_items  1─N  order_items
+restaurants  1─N  orders            1─N  order_items
+users        1─N  orders
+```
+
+- Money is `Numeric(10, 2)`, never `Float`.
+- Timestamps are `DateTime(timezone=True)` with `server_default=func.now()`; `orders.updated_at`
+  also carries `onupdate=func.now()`, so that clock has exactly one definition.
+- `app/db/base.py` imports every model below `Base`, which is what makes Alembic autogenerate see
+  all five tables.
+
+## Enums
+
+Both are `(str, Enum)` and both become native Postgres enum types via
+`Enum(..., name="user_role" | "order_status")`.
+
+- `UserRole`: `user`, `admin`.
+- `OrderStatus`: `pending`, `accepted`, `out_for_delivery`, `delivered`.
+
+## Invariants
+
+- **Status moves one step forward.** `pending → accepted → out_for_delivery → delivered`.
+  `delivered` is terminal, there is no cancellation, and every other move is refused with 409.
+  The table lives in `app/services/transitions.py`.
+- **`order_items.unit_price` is a snapshot** taken when the order is placed. Re-pricing a dish
+  never restates what a customer was already charged, and `orders.total_amount` is never
+  recomputed from today's menu.
+- **Availability is a flag**, `restaurant_items.is_available`. No stock counts, no
+  ingredient-level inventory.
+- **Registration never grants admin.** Roles change only through `PATCH /admin/users/{id}`.
+
+## Auth
+
+Custom JWT, **not** `fastapi-users` — the default FastAPI approach, minimal dependencies, and
+full control over the token payload, expiry and role checks.
+
+- Token extraction: `OAuth2PasswordBearer(tokenUrl="/auth/login")`, so `POST /auth/login`
+  consumes `OAuth2PasswordRequestForm` and its `username` field carries the email.
+- Tokens: PyJWT, HS256, decoded with an explicit `algorithms=["HS256"]` allowlist. Claims are
+  `sub` (user id as a string), `role`, `exp`, `iat`.
+- Access tokens are short-lived (15–30 min). No refresh tokens, no revocation list, no password
+  reset. A deactivated account is refused on its next request because `get_current_user`
+  re-reads `is_active`.
+- Passwords: one-way Argon2 hashing via pwdlib. No schema ever serialises the hash.
+- Roles: two, `user` and `admin`.
+- Dependencies in `app/api/deps.py`, exposed as `Annotated` aliases so no router signature ever
+  spells out `Depends(...)` inline: `CurrentUser`, `AdminUser`, `OptionalUser`, `DbSession`.
+
+## API conventions
+
+- **Status codes:** 401 authentication, 403 authorization, 404 unknown id, 400 business rule,
+  409 state conflict or duplicate, 422 malformed input.
+- **Errors:** services raise from the `AppError` hierarchy in `app/core/errors.py` and stay free
+  of `fastapi`; handlers registered in the app factory render `{"detail": "..."}`.
+- **PATCH bodies** are all-optional schemas applied with `model_dump(exclude_unset=True)`. `None`
+  means "field absent", so an explicit `null` on a NOT NULL column is 422, never 500.
+- **Listings** order by `created_at DESC, id DESC`. The id tiebreaker is load-bearing: Postgres
+  `now()` is the transaction clock, so rows written together share a timestamp.
+- **Paging** is `limit` 1–100 (default 20) and `offset` ≥ 0. The `/admin` listings wrap their
+  page in `PaginatedResponse[T]`; `GET /orders` and `GET /restaurants` return bare lists.
+
+## Runtime shape
+
+- **One command:** `docker compose up --build`. `docker/entrypoint.sh` runs `alembic upgrade head`
+  and then `exec gunicorn`, under `set -e` — nothing manual sits between `up` and a working API.
+- **nginx is the only ingress.** The `api` service publishes no host port; only nginx does, on
+  8080. That is what makes Gunicorn's `--forwarded-allow-ips='*'` safe — if the API is ever
+  published directly, the wildcard has to go in the same change.
+- **The API image is two-stage** and the runtime stage carries no source tree: the builder runs
+  `pip install . --no-deps` into `/opt/venv`, which the runtime copies along with `alembic.ini`
+  and `alembic/`. `--no-deps` is what stops pip re-resolving past the lockfile.
+- **Base images float on minor tags** (`python:3.12-slim`, `nginx:1-alpine`). Digest pinning was
+  considered and left out: for a tech challenge, a compose file a reviewer can read at a glance
+  is worth more than byte-exact image identity. A deployment that needs reproducible images pins
+  digests here.
+
+## Out of scope
+
+Product features this project does not have and will not grow: payments, refunds, coupons,
+driver assignment, GPS or live tracking, and any inventory beyond the availability flag.
+
+Engineering gaps that were found, weighed and deliberately left unbuilt are listed under
+[Known limitations](../README.md#known-limitations) in the README.
