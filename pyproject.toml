@@ -28,9 +28,34 @@ test = [
     "httpx==0.28.1",
     "pytest-cov==7.1.0",
 ]
+dev = [
+    "ruff==0.16.8",
+    "mypy==2.3.1",
+]
 
 [tool.hatch.build.targets.wheel]
 packages = ["app"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+ignore = [
+    "E501",   # ruff format owns line length; it cannot split long comments or generated strings
+    "UP042",  # (str, Enum) -> StrEnum changes str(UserRole.user); a behaviour change, not a refactor
+    "UP046",  # PEP 695 type params would rewrite a shipped response schema (PaginatedResponse)
+    "UP047",  # PEP 695 type params on the _page helper; same reason
+]
+
+[tool.ruff.lint.isort]
+known-third-party = ["alembic"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+warn_unused_ignores = true
