@@ -3,7 +3,10 @@
 # excluding them means editing either one does not invalidate the build cache.
 .git
 .venv
-__pycache__
+# `**/` because a bare `__pycache__` matches only the repository root:
+# Docker's ignore patterns are path-matched, not recursive, so the host's
+# alembic/versions/__pycache__ would otherwise ship inside the image.
+**/__pycache__
 .pytest_cache
 htmlcov
 .env

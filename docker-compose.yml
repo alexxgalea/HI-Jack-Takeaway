@@ -45,5 +45,24 @@ services:
       # Covers the first-boot migration, which runs before the port opens.
       start_period: 30s
 
+  nginx:
+    image: nginx:1-alpine
+    depends_on:
+      api:
+        # Healthy, not merely started: the api entrypoint runs the migrations
+        # before gunicorn binds its port, and nginx resolves this upstream at
+        # config load. Gating on "started" leaves a window where the proxy is
+        # accepting traffic and answering 502.
+        condition: service_healthy
+    ports:
+      # 8080, not 80: binding a port below 1024 needs root, and this has to
+      # come up unprivileged on a developer machine. The only published
+      # application port in the stack.
+      - "8080:80"
+    volumes:
+      # Read-only: nginx never writes its own config, and a container that
+      # cannot rewrite it cannot quietly diverge from what is in the repo.
+      - ./docker/nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+
 volumes:
   hijack_takeaway_pgdata:
