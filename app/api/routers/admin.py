@@ -156,7 +156,7 @@ def list_orders(
         _order_filters(order_status, restaurant_id, customer_id, since, until)
     )
     orders, total = _page(db, stmt, limit, offset)
-    return PaginatedResponse[OrderOut](items=orders, total=total, limit=limit, offset=offset)
+    return PaginatedResponse[OrderOut](items=orders, total=total, limit=limit, offset=offset)  # type: ignore[arg-type]
 
 
 @router.get("/restaurants/{restaurant_id}/orders")
@@ -180,7 +180,7 @@ def list_restaurant_orders(
 
     stmt = _orders_newest_first([Order.restaurant_id == restaurant_id])
     orders, total = _page(db, stmt, limit, offset)
-    return PaginatedResponse[OrderOut](items=orders, total=total, limit=limit, offset=offset)
+    return PaginatedResponse[OrderOut](items=orders, total=total, limit=limit, offset=offset)  # type: ignore[arg-type]
 
 
 # --- users ----------------------------------------------------------------
@@ -198,7 +198,7 @@ def list_users(
     """
     stmt = select(User).order_by(User.id)
     users, total = _page(db, stmt, limit, offset)
-    return PaginatedResponse[UserOut](items=users, total=total, limit=limit, offset=offset)
+    return PaginatedResponse[UserOut](items=users, total=total, limit=limit, offset=offset)  # type: ignore[arg-type]
 
 
 @router.patch("/users/{user_id}", response_model=UserOut)
